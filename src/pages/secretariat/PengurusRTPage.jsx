@@ -15,10 +15,13 @@ import { db } from "../../services/firebase";
 
 const jabatanOptions = [
   { value: "pak rt", label: "Ketua RT" },
-  { value: "sekretaris", label: "Sekretaris" },
-  { value: "bendahara", label: "Bendahara" },
   { value: "ketua pkk", label: "Ketua PKK" },
-  { value: "anggota", label: "Anggota" },
+  { value: "sekretaris rt", label: "Sekretaris RT" },
+  { value: "sekretaris pkk", label: "Sekretaris PKK" },
+  { value: "bendahara rt", label: "Bendahara RT" },
+  { value: "bendahara pkk", label: "Bendahara PKK" },
+  { value: "anggota rt", label: "Anggota rt" },
+  { value: "anggota pkk", label: "Anggota pkk" },
 ];
 
 const PengurusRTPage = () => {

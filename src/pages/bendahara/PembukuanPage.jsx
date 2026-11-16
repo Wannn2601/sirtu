@@ -14,6 +14,7 @@ const PembukaanPage = () => {
   const [rekeningKegiatanData, setRekeningKegiatanData] = useState([]);
   const [subRekeningKegiatanData, setSubRekeningKegiatanData] = useState([]);
   const [userData, setUserData] = useState(null);
+  const [pengurusList, setPengurusList] = useState([]); // 🟢 State untuk data pengurus RT/PKK
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -21,7 +22,7 @@ const PembukaanPage = () => {
   const [modalMode, setModalMode] = useState("add");
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedPembukuan, setSelectedPembukuan] = useState("");
+  const [selectedPembukuan, setSelectedPembukuan] = useState("RT"); // Default RT
   const [selectedJenisPembukuan, setSelectedJenisPembukuan] =
     useState("keseluruhan");
   const [searchTerm, setSearchTerm] = useState("");
@@ -89,7 +90,7 @@ const PembukaanPage = () => {
     dibuat_oleh: "",
     id_user: "",
     jabatan_user: "",
-    no_arsip: "", // New field
+    no_arsip: "",
   });
 
   useEffect(() => {
@@ -106,8 +107,6 @@ const PembukaanPage = () => {
         usersData.find((u) => u.id.toString() === userId) ||
         usersData.find((u) => u.level === "superadmin" && u.status === "aktif");
 
-      console.log("[v0] Current user:", currentUser);
-
       setUserData(currentUser);
 
       if (currentUser?.jabatan?.toLowerCase().includes("bendahara rt")) {
@@ -118,33 +117,17 @@ const PembukaanPage = () => {
         setSelectedPembukuan("PKK");
       }
 
-      const [pembukaanList, rekeningList, subRekeningList] = await Promise.all([
+      const [pembukaanList, rekeningList, subRekeningList, pengurusListRes] = await Promise.all([
         firestoreService.getAll("laporanKeuangan"),
         firestoreService.getAll("rekeningKegiatan"),
         firestoreService.getAll("subRekeningKegiatan"),
+        firestoreService.getAll("pengurusRT"), // 🟢 Ambil data pengurus dari Firebase
       ]);
-
-      setSubRekeningKegiatanData(subRekeningList);
-
-      console.log(
-        "[v0] Pembukuan data loaded:",
-        pembukaanList.length,
-        "records"
-      );
-      console.log(
-        "[v0] Rekening kegiatan data:",
-        rekeningList.length,
-        "records"
-      );
-      console.log(
-        "[v0] Sub rekening kegiatan data:",
-        subRekeningList.length,
-        "records"
-      );
 
       setPembukaanData(pembukaanList);
       setRekeningKegiatanData(rekeningList);
       setSubRekeningKegiatanData(subRekeningList);
+      setPengurusList(pengurusListRes || []); // 🟢 Simpan ke state pengurus
     } catch (error) {
       console.error("Error loading data:", error);
       Swal.fire({
@@ -155,6 +138,33 @@ const PembukaanPage = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 🟢 Fungsi helper untuk mendeteksi penandatangan berdasarkan referensi jabatan di Firebase
+  const getPenandatanganInfo = () => {
+    const isPkk = selectedPembukuan === "PKK";
+
+    const ketuaJabatanTarget = isPkk ? "ketua pkk" : "pak rt";
+    const bendaharaJabatanTarget = isPkk ? "bendahara pkk" : "bendahara rt";
+
+    const ketua = pengurusList.find(
+      (p) =>
+        p.status?.toLowerCase() === "aktif" &&
+        p.jabatan?.toLowerCase().trim() === ketuaJabatanTarget
+    );
+
+    const bendahara = pengurusList.find(
+      (p) =>
+        p.status?.toLowerCase() === "aktif" &&
+        p.jabatan?.toLowerCase().trim() === bendaharaJabatanTarget
+    );
+
+    return {
+      labelKetua: isPkk ? "Ketua PKK" : "Ketua RT",
+      namaKetua: ketua?.nama_warga || "[Nama Ketua]",
+      labelBendahara: isPkk ? "Bendahara PKK" : "Bendahara RT",
+      namaBendahara: bendahara?.nama_warga || "[Nama Bendahara]",
+    };
   };
 
   const months = [
@@ -248,10 +258,8 @@ const PembukaanPage = () => {
 
     const matchesYear = itemYear === selectedYear;
     const matchesMonth = itemMonth === selectedMonth;
-    // Tampilkan semua tanpa filter RT/PKK
     const matchesPembukuan =
       selectedPembukuan === "" || item.pembukuan === selectedPembukuan;
-    // Tampilkan semua tanpa filter Penerimaan/Pengeluaran
     const matchesJenis =
       selectedJenisPembukuan === "keseluruhan" ||
       item.jenis_pembukuan === selectedJenisPembukuan;
@@ -260,22 +268,7 @@ const PembukaanPage = () => {
       item.keterangan?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.uraian?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.detail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.no_arsip?.toLowerCase().includes(searchTerm.toLowerCase()); // Added no_arsip to search
-
-    if (item.id === pembukaanData[0]?.id) {
-      console.log("[v0] Filter debug for first item:", {
-        item,
-        itemYear,
-        itemMonth,
-        selectedYear,
-        selectedMonth,
-        matchesYear,
-        matchesMonth,
-        matchesPembukuan,
-        matchesJenis,
-        matchesSearch,
-      });
-    }
+      item.no_arsip?.toLowerCase().includes(searchTerm.toLowerCase());
 
     return (
       matchesYear &&
@@ -286,14 +279,10 @@ const PembukaanPage = () => {
     );
   });
 
-  console.log("[v0] Filtered data count:", filteredData.length);
-  console.log("[v0] Total pembukuan data:", pembukaanData.length);
-
   const totalPages = Math.ceil(filteredData.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedData = filteredData
-    .sort((a, b) => new Date(a.tanggal) - new Date(b.tanggal)) // urut naik (tanggal lama ke baru)
-    // Jika ingin urut terbaru dulu, ubah jadi: (b, a)
+    .sort((a, b) => new Date(a.tanggal) - new Date(b.tanggal))
     .slice(startIndex, startIndex + itemsPerPage);
 
   const formatCurrencyInput = (value) => {
@@ -344,7 +333,7 @@ const PembukaanPage = () => {
         kas_type: userData?.jabatan?.toLowerCase().includes("bendahara pkk")
           ? "KAS PKK"
           : "KAS RT",
-        jenis_pembukuan: lockStatus.locked ? "Penerimaan" : "Penerimaan",
+        jenis_pembukuan: "Penerimaan",
         id_sub_rekening_asal: "",
         id_sub_rekening_tujuan: "",
         jumlah: "",
@@ -356,7 +345,7 @@ const PembukaanPage = () => {
         dibuat_oleh: userData?.nama || "",
         id_user: userData?.id || "",
         jabatan_user: userData?.jabatan || userData?.level || "",
-        no_arsip: "", // New field
+        no_arsip: "",
       });
       setShowModal(true);
     } else if (mode === "edit" && lockStatus.locked) {
@@ -397,7 +386,7 @@ const PembukaanPage = () => {
           id_user: data.id_user || userData?.id || "",
           jabatan_user:
             data.jabatan_user || userData?.jabatan || userData?.level || "",
-          no_arsip: data.no_arsip || "", // New field
+          no_arsip: data.no_arsip || "",
         });
       }
       setShowModal(true);
@@ -419,24 +408,6 @@ const PembukaanPage = () => {
 
   const handleCloseModal = () => {
     setShowModal(false);
-    setFormData({
-      id: null,
-      tanggal: new Date().toISOString().split("T")[0],
-      kas_type: "KAS RT",
-      jenis_pembukuan: "Penerimaan",
-      id_sub_rekening_asal: "",
-      id_sub_rekening_tujuan: "",
-      jumlah: "",
-      terbilang: "",
-      keterangan: "",
-      uraian: "",
-      pembukuan: "",
-      status: false,
-      dibuat_oleh: "",
-      id_user: "",
-      jabatan_user: "",
-      no_arsip: "", // New field
-    });
   };
 
   const handleOpenDetailModal = (data) => {
@@ -466,7 +437,6 @@ const PembukaanPage = () => {
       return;
     }
 
-    // ✅ Validasi Field Kosong
     if (
       !formData.tanggal ||
       !formData.id_sub_rekening_asal ||
@@ -477,18 +447,6 @@ const PembukaanPage = () => {
         icon: "warning",
         title: "Peringatan!",
         text: "Semua field wajib diisi. Mohon lengkapi data terlebih dahulu.",
-      });
-      return;
-    }
-
-    if (
-      formData.jenis_pembukuan === "Mutasi Anggaran" &&
-      !formData.id_sub_rekening_tujuan
-    ) {
-      Swal.fire({
-        icon: "warning",
-        title: "Peringatan!",
-        text: "Mohon pilih Rekening Tujuan untuk Mutasi Anggaran.",
       });
       return;
     }
@@ -533,9 +491,6 @@ const PembukaanPage = () => {
       );
 
       if (formData.jenis_pembukuan === "Mutasi Anggaran") {
-        const uraianText = `Mutasi Anggaran dari ${subRekeningAsal?.sub_rekening_kegiatan} ke ${subRekeningTujuan?.sub_rekening_kegiatan}`;
-
-        // Record 1: Source (Pengeluaran)
         const recordAsal = {
           tanggal: formData.tanggal,
           uraian: formData.uraian,
@@ -558,10 +513,9 @@ const PembukaanPage = () => {
           is_mutasi_source: true,
           createdAt: modalMode === "add" ? new Date().toISOString() : undefined,
           updatedAt: new Date().toISOString(),
-          no_arsip: formData.no_arsip, // New field
+          no_arsip: formData.no_arsip,
         };
 
-        // Record 2: Destination (Penerimaan)
         const recordTujuan = {
           tanggal: formData.tanggal,
           uraian: formData.uraian,
@@ -584,7 +538,7 @@ const PembukaanPage = () => {
           is_mutasi_destination: true,
           createdAt: modalMode === "add" ? new Date().toISOString() : undefined,
           updatedAt: new Date().toISOString(),
-          no_arsip: formData.no_arsip, // New field
+          no_arsip: formData.no_arsip,
         };
 
         if (modalMode === "add") {
@@ -597,7 +551,6 @@ const PembukaanPage = () => {
             recordAsal
           );
 
-          // Find and update the corresponding destination record
           const destinationRecord = pembukaanData.find(
             (item) =>
               item.id_sub_rekening_kegiatan ===
@@ -618,7 +571,7 @@ const PembukaanPage = () => {
       } else {
         const laporanData = {
           tanggal: formData.tanggal,
-          uraian: subRekeningAsal?.uraian || "", // 🟢 Harus sama dengan nama sub rekening
+          uraian: subRekeningAsal?.uraian || "",
           detail: formData.keterangan,
           saldo_bulan_lalu: 0,
           penerimaan:
@@ -626,13 +579,13 @@ const PembukaanPage = () => {
           pengeluaran:
             formData.jenis_pembukuan === "Pengeluaran" ? jumlahValue : 0,
           saldo_bulan_ini: 0,
-          pembukuan: formData.kas_type === "KAS PKK" ? "PKK" : "RT", // 🟢 Hanya "RT" / "PKK"
+          pembukuan: formData.kas_type === "KAS PKK" ? "PKK" : "RT",
           kategori: formData.kas_type === "KAS PKK" ? "kas_pkk" : "kas_rt",
           jenis_pembukuan: formData.jenis_pembukuan,
           id_sub_rekening_kegiatan: formData.id_sub_rekening_asal,
           dibuat_oleh: userData?.nama || "",
           createdAt: new Date().toISOString(),
-          no_arsip: formData.no_arsip, // New field
+          no_arsip: formData.no_arsip,
         };
 
         if (modalMode === "add") {
@@ -707,7 +660,6 @@ const PembukaanPage = () => {
         if (item.jenis_pembukuan === "Mutasi Anggaran") {
           await firestoreService.delete("laporanKeuangan", id);
 
-          // Find and delete the corresponding record
           const correspondingRecord = pembukaanData.find(
             (record) =>
               record.id !== id &&
@@ -755,7 +707,6 @@ const PembukaanPage = () => {
   };
 
   const handleToggleStatus = async (id, currentStatus) => {
-    // Only Pak RT can check/uncheck
     if (
       userData?.level !== "superadmin" &&
       !userData?.jabatan?.toLowerCase().includes("pak rt")
@@ -792,7 +743,7 @@ const PembukaanPage = () => {
       const exportData = filteredData.map((item, index) => ({
         No: index + 1,
         Tanggal: formatDate(item.tanggal),
-        "No Arsip": item.no_arsip || "", // New field
+        "No Arsip": item.no_arsip || "",
         Uraian: item.uraian || "",
         Kegiatan: item.detail || item.keterangan || "",
         Pembukuan: item.pembukuan || "",
@@ -827,6 +778,7 @@ const PembukaanPage = () => {
   const exportToPDF = () => {
     try {
       const doc = new jsPDF();
+      const ttd = getPenandatanganInfo(); // 🟢 Ambil info TTD dinamis
 
       doc.setFontSize(16);
       doc.text("Histori Pembukuan Keuangan", 14, 15);
@@ -850,15 +802,14 @@ const PembukaanPage = () => {
           userData.kabupaten_kota || userData.Kabupaten_Kota || "-";
 
         doc.text(`RT ${rt} RW ${rw} Kelurahan ${kelurahan}`, 14, 35);
-        doc.text(`Kecamatan ${kecamatan} - Kab/Kota ${kabupaten}`, 14, 40);
       }
 
       const tableData = filteredData
-        .sort((a, b) => new Date(b.tanggal) - new Date(a.tanggal)) // urut terbaru di atas
+        .sort((a, b) => new Date(b.tanggal) - new Date(a.tanggal))
         .map((item, index) => [
           index + 1,
           formatDate(item.tanggal),
-          item.no_arsip || "", // New field
+          item.no_arsip || "",
           item.uraian || "",
           item.detail || item.keterangan || "",
           item.pembukuan || "",
@@ -874,7 +825,7 @@ const PembukaanPage = () => {
           [
             "No",
             "Tanggal",
-            "No Arsip", // New column
+            "No Arsip",
             "Uraian",
             "Kegiatan",
             "Pembukuan",
@@ -889,48 +840,35 @@ const PembukaanPage = () => {
         headStyles: { fillColor: [66, 139, 202] },
         didDrawPage: (data) => {
           const pageHeight = doc.internal.pageSize.height;
+          const pageWidth = doc.internal.pageSize.width;
           const printedAt = new Date().toLocaleString("id-ID");
+
+          // 🟢 Tambahkan Tanda Tangan di PDF AutoTable
+          const finalY = data.cursor.finalY + 15;
+          if (finalY < pageHeight - 40) {
+            doc.setFontSize(10);
+            doc.text("Mengetahui,", 14, finalY);
+            doc.text(ttd.labelKetua, 14, finalY + 6);
+            doc.text(ttd.namaKetua, 14, finalY + 25);
+
+            doc.text(`Bendahara,`, pageWidth - 50, finalY);
+            doc.text(ttd.labelBendahara, pageWidth - 50, finalY + 6);
+            doc.text(ttd.namaBendahara, pageWidth - 50, finalY + 25);
+          }
 
           doc.setFontSize(8);
           doc.setTextColor(100);
           doc.text(
-            `Dicetak melalui aplikasi SIRTU - Sistem Informasi RT Umum | ${window.location.origin}`,
+            `Dicetak melalui aplikasi SIRTU | ${window.location.origin}`,
             14,
-            pageHeight - 15
+            pageHeight - 10
           );
-
-          if (userData) {
-            const rt = userData.rt || userData.RT || "-";
-            const rw = userData.rw || userData.RW || "-";
-            const kelurahan = userData.kelurahan || userData.Kelurahan || "-";
-            const kecamatan = userData.kecamatan || userData.Kecamatan || "-";
-            const kabupaten =
-              userData.kabupaten_kota || userData.Kabupaten_Kota || "-";
-            doc.text(
-              `RT ${rt} RW ${rw}, Kel. ${kelurahan}, Kec. ${kecamatan}, ${kabupaten} | Tanggal Cetak: ${printedAt}`,
-              14,
-              pageHeight - 10
-            );
-          } else {
-            doc.text(`Tanggal Cetak: ${printedAt}`, 14, pageHeight - 10);
-          }
         },
       });
 
-      // 🔹 Generate PDF blob untuk preview
       const pdfBlob = doc.output("blob");
       const pdfURL = URL.createObjectURL(pdfBlob);
-
-      // 🔹 Buka tab baru untuk preview
       window.open(pdfURL, "_blank");
-
-      Swal.fire({
-        icon: "success",
-        title: "Preview PDF Dibuka!",
-        text: "Anda dapat meninjau file PDF sebelum mengunduhnya.",
-        timer: 2500,
-        showConfirmButton: false,
-      });
     } catch (error) {
       console.error("Error exporting to PDF:", error);
       Swal.fire({
@@ -948,19 +886,17 @@ const PembukaanPage = () => {
     ];
 
     return allSubRekenings.filter((sr) => {
-      // Filter by pembukuan (RT/PKK)
       const kasType = formData.kas_type === "KAS RT" ? "RT" : "PKK";
       const matchesPembukuan = sr.pembukuan === kasType;
-
-      // Filter by jenis pembukuan (Penerimaan/Pengeluaran)
       const matchesJenis = sr.pencatatan === formData.jenis_pembukuan;
-
-      // Filter by status (allow aktif status, don't filter by locked - show locked items too)
       const matchesStatus = sr.status === "aktif";
 
       return matchesPembukuan && matchesJenis && matchesStatus;
     });
   };
+
+  // 🟢 Ambil data tanda tangan aktif berdasarkan filter Pembukuan saat ini
+  const currentTtd = getPenandatanganInfo();
 
   return (
     <div className="p-6">
@@ -1031,7 +967,6 @@ const PembukaanPage = () => {
             }
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
           >
-            {/* <option value="keseluruhan">Keseluruhan</option> */}
             <option value="RT">RT</option>
             <option value="PKK">PKK</option>
           </select>
@@ -1130,12 +1065,6 @@ const PembukaanPage = () => {
                 <th className="border border-gray-400 px-3 py-2 text-sm font-semibold text-left">
                   Uraian
                 </th>
-                {/* <th className="border border-gray-400 px-3 py-2 text-sm font-semibold text-left">
-                  Kegiatan
-                </th> */}
-                {/* <th className="border border-gray-400 px-3 py-2 text-sm font-semibold text-left">
-                  Pembukuan
-                </th> */}
                 <th className="border border-gray-400 px-3 py-2 text-sm font-semibold text-right">
                   Penerimaan
                 </th>
@@ -1145,7 +1074,6 @@ const PembukaanPage = () => {
                 <th className="border border-gray-400 px-3 py-2 text-sm font-semibold text-center">
                   Audited
                 </th>
-                {/* <th className="border border-gray-400 px-3 py-2 text-sm font-semibold text-left">Pencatat</th> */}
                 <th className="border border-gray-400 px-3 py-2 text-sm font-semibold text-center">
                   Aksi
                 </th>
@@ -1154,13 +1082,13 @@ const PembukaanPage = () => {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="9" className="text-center py-8">
+                  <td colSpan="7" className="text-center py-8">
                     Loading...
                   </td>
                 </tr>
               ) : paginatedData.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="text-center py-8 text-gray-500">
+                  <td colSpan="7" className="text-center py-8 text-gray-500">
                     Tidak ada data
                   </td>
                 </tr>
@@ -1184,14 +1112,6 @@ const PembukaanPage = () => {
                         {item.detail || "-"}
                       </span>
                     </td>
-                    {/* <td className="border border-gray-400 px-3 py-2 text-sm">
-                      {subRekeningKegiatanData.find(
-                        (sr) => sr.id === item.id_sub_rekening_kegiatan
-                      )?.sub_rekening_kegiatan || "-"}
-                    </td> */}
-                    {/* <td className="border border-gray-400 px-3 py-2 text-sm">
-                      {item.pembukuan || "-"}
-                    </td> */}
                     <td className="border border-gray-400 px-3 py-2 text-sm text-right">
                       {formatCurrency(item.penerimaan || 0)}
                     </td>
@@ -1210,7 +1130,6 @@ const PembukaanPage = () => {
                         className="w-4 h-4 cursor-pointer"
                       />
                     </td>
-                    {/* <td className="border border-gray-400 px-3 py-2 text-sm">{item.dibuat_oleh || "-"}</td> */}
                     <td className="border border-gray-400 px-3 py-2 text-sm">
                       <div className="flex justify-center gap-2">
                         <button
@@ -1280,6 +1199,27 @@ const PembukaanPage = () => {
         </div>
       </div>
 
+      {/* 🟢 BAGIAN TANDA TANGAN DINAMIS DI BAWAH TABEL */}
+      <div className="mt-8 bg-white p-6 border border-gray-300 rounded-lg flex justify-between items-center text-sm">
+        <div>
+          <p className="font-medium">Mengetahui,</p>
+          <p className="font-semibold">{currentTtd.labelKetua}</p>
+          <div className="mt-16">
+            <p className="font-bold underline">{currentTtd.namaKetua}</p>
+          </div>
+        </div>
+
+        <div className="text-right">
+          <p className="font-medium">
+            {userData?.kabupaten_kota || "Kota"}, {formatDate(new Date())}
+          </p>
+          <p className="font-semibold">{currentTtd.labelBendahara}</p>
+          <div className="mt-16">
+            <p className="font-bold underline">{currentTtd.namaBendahara}</p>
+          </div>
+        </div>
+      </div>
+
       {/* Modal Buat/Edit Pembukuan */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1299,16 +1239,6 @@ const PembukaanPage = () => {
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              {/* Lokasi RT/RW */}
-              {userData && (
-                <p className="mb-2 text-sm text-gray-600">
-                  RT {userData.RT} RW {userData.RW} - Kelurahan{" "}
-                  {userData.Kelurahan} - Kecamatan {userData.kecamatan} -
-                  Kab/Kota {userData.kabupaten_kota}
-                </p>
-              )}
-
-              {/* 1. Tanggal */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Tanggal
@@ -1325,7 +1255,6 @@ const PembukaanPage = () => {
                 />
               </div>
 
-              {/* 2. Pembukuan (Kas RT/PKK) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Pembukuan
@@ -1363,7 +1292,6 @@ const PembukaanPage = () => {
                 </div>
               </div>
 
-              {/* 3. Jenis Pembukuan */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Jenis Pembukuan
@@ -1388,15 +1316,8 @@ const PembukaanPage = () => {
                     </label>
                   ))}
                 </div>
-                {lockStatus.locked && (
-                  <p className="text-xs text-amber-600 mt-2">
-                    ⚠️ Monitoring sedang ON. Hanya Penerimaan yang dapat
-                    dipilih.
-                  </p>
-                )}
               </div>
 
-              {/* 4. Rekening Asal */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Kelompok Pembukuan
@@ -1413,138 +1334,29 @@ const PembukaanPage = () => {
                   required
                 >
                   <option value="">-- Pilih Sub Rekening Asal --</option>
-
                   {getAvailableSubRekening().map((sr) => (
                     <option key={sr.id} value={sr.id}>
                       {sr.uraian} {sr.is_locked ? "(Terkunci)" : ""}
                     </option>
                   ))}
                 </select>
-
-                {/* {formData.id_sub_rekening_asal && (
-                  <p className="mt-1 text-sm text-gray-600">
-                    Saldo:{" "}
-                    {formatCurrency(
-                      getSaldoRekening(
-                        formData.id_sub_rekening_asal,
-                        selectedYear
-                      )
-                    )}
-                  </p>
-                )} */}
               </div>
 
-              {/* 5. Rekening Tujuan (hanya Mutasi) */}
-              {formData.jenis_pembukuan === "Mutasi Anggaran" && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Rekening Tujuan
-                  </label>
-                  <select
-                    value={formData.id_sub_rekening_tujuan}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        id_sub_rekening_tujuan: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                    required
-                  >
-                    <option value="">-- Pilih Sub Rekening Tujuan --</option>
-                    {subRekeningKegiatanData
-                      .filter(
-                        (sr) =>
-                          sr.pembukuan ===
-                            (formData.kas_type === "KAS RT" ? "RT" : "PKK") &&
-                          sr.id !== formData.id_sub_rekening_asal
-                      )
-                      .map((sr) => (
-                        <option key={sr.id} value={sr.id}>
-                          {sr.uraian}
-                        </option>
-                      ))}
-                  </select>
-                  {formData.id_sub_rekening_tujuan && (
-                    <p className="mt-1 text-sm text-gray-600">
-                      Saldo:{" "}
-                      {formatCurrency(
-                        getSaldoRekening(
-                          formData.id_sub_rekening_tujuan,
-                          selectedYear
-                        )
-                      )}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* 9. Keterangan (Gabungan Uraian + Keterangan) */}
-              {/* 9. Keterangan (Gabungan Uraian + Keterangan) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Keterangan
                 </label>
                 <textarea
-                  value={
-                    formData.jenis_pembukuan === "Mutasi Anggaran"
-                      ? (() => {
-                          const asal =
-                            subRekeningKegiatanData.find(
-                              (s) => s.id === formData.id_sub_rekening_asal
-                            )?.sub_rekening_kegiatan || "Rekening Asal";
-                          const tujuan =
-                            subRekeningKegiatanData.find(
-                              (s) => s.id === formData.id_sub_rekening_tujuan
-                            )?.sub_rekening_kegiatan || "Rekening Tujuan";
-                          const prefix = `Mutasi Saldo ${asal} ke ${tujuan}`;
-                          return formData.keterangan.startsWith(prefix)
-                            ? formData.keterangan
-                            : `${prefix}${
-                                formData.keterangan
-                                  ? " " + formData.keterangan
-                                  : ""
-                              }`;
-                        })()
-                      : formData.keterangan
+                  value={formData.keterangan}
+                  onChange={(e) =>
+                    setFormData({ ...formData, keterangan: e.target.value })
                   }
-                  onChange={(e) => {
-                    if (formData.jenis_pembukuan === "Mutasi Anggaran") {
-                      const asal =
-                        subRekeningKegiatanData.find(
-                          (s) => s.id === formData.id_sub_rekening_asal
-                        )?.sub_rekening_kegiatan || "Rekening Asal";
-                      const tujuan =
-                        subRekeningKegiatanData.find(
-                          (s) => s.id === formData.id_sub_rekening_tujuan
-                        )?.sub_rekening_kegiatan || "Rekening Tujuan";
-                      const prefix = `Mutasi Saldo ${asal} ke ${tujuan}`;
-
-                      // Pastikan prefix tetap ada di awal
-                      const newText = e.target.value;
-                      const cleanText = newText.startsWith(prefix)
-                        ? newText
-                        : `${prefix} ${newText.replace(
-                            /^Mutasi Saldo dari.*ke.*\s*/i,
-                            ""
-                          )}`;
-
-                      setFormData({ ...formData, keterangan: cleanText });
-                    } else {
-                      setFormData({ ...formData, keterangan: e.target.value });
-                    }
-                  }}
-                  className={`w-full px-3 py-2 border rounded-md ${
-                    formData.jenis_pembukuan === "Mutasi Anggaran"
-                      ? "text-green-600 font-medium"
-                      : ""
-                  }`}
+                  className="w-full px-3 py-2 border rounded-md"
                   rows={3}
                   placeholder="Masukkan keterangan tambahan..."
                 />
               </div>
 
-              {/* 6. Jumlah */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Jumlah
@@ -1571,18 +1383,6 @@ const PembukaanPage = () => {
                     required
                   />
                 </div>
-                {formData.jenis_pembukuan === "Mutasi Anggaran" &&
-                  formData.id_sub_rekening_asal && (
-                    <p className="mt-1 text-xs text-red-500">
-                      * Tidak boleh lebih besar dari saldo rekening asal (
-                      {formatCurrency(
-                        getSaldoRekening(
-                          formData.id_sub_rekening_asal,
-                          selectedYear
-                        )
-                      )}
-                    </p>
-                  )}
               </div>
 
               {formData.terbilang && (
@@ -1609,36 +1409,15 @@ const PembukaanPage = () => {
                   onChange={(e) =>
                     setFormData({
                       ...formData,
-                      no_arsip: e.target.value.slice(0, 5), // batasi hanya 5 karakter
+                      no_arsip: e.target.value.slice(0, 5),
                     })
                   }
-                  maxLength={5} // batas maksimal
+                  maxLength={5}
                   className="w-full px-3 py-2 border rounded-md"
                   placeholder="Masukkan nomor arsip (maks 5 karakter)"
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Dibukukan oleh
-                </label>
-                <div className="space-y-1 text-sm text-gray-600">
-                  <p>
-                    <span className="font-medium">Nama:</span>{" "}
-                    {userData?.nama || "-"}
-                  </p>
-                  <p>
-                    <span className="font-medium">Jabatan:</span>{" "}
-                    {userData?.jabatan || userData?.level || "-"}
-                  </p>
-                  <p>
-                    <span className="font-medium">ID User:</span>{" "}
-                    {userData?.id || "-"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Tombol */}
               <div className="mt-6 flex justify-end gap-3">
                 <button
                   type="button"
@@ -1649,17 +1428,8 @@ const PembukaanPage = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={
-                    loading ||
-                    (formData.jenis_pembukuan === "Mutasi Anggaran" &&
-                      formData.id_sub_rekening_asal &&
-                      Number(formData.jumlah.replace(/\D/g, "")) >
-                        getSaldoRekening(
-                          formData.id_sub_rekening_asal,
-                          selectedYear
-                        ))
-                  }
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={loading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
                 >
                   {loading ? "Menyimpan..." : "SIMPAN"}
                 </button>
@@ -1669,6 +1439,7 @@ const PembukaanPage = () => {
         </div>
       )}
 
+      {/* Modal Detail */}
       {showDetailModal && selectedDetail && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -1717,22 +1488,8 @@ const PembukaanPage = () => {
                 </div>
                 <div className="col-span-2">
                   <p className="text-sm font-medium text-gray-700">Uraian</p>
-                  <p
-                    className={`text-sm ${
-                      selectedDetail.jenis_pembukuan === "Mutasi Anggaran"
-                        ? "text-green-600"
-                        : "text-gray-900"
-                    }`}
-                  >
-                    {selectedDetail.uraian || "-"}
-                  </p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-sm font-medium text-gray-700">Kegiatan</p>
                   <p className="text-sm text-gray-900">
-                    {subRekeningKegiatanData.find(
-                      (sr) => sr.id === selectedDetail.id_sub_rekening_kegiatan
-                    )?.sub_rekening_kegiatan || "-"}
+                    {selectedDetail.uraian || "-"}
                   </p>
                 </div>
                 <div>
@@ -1752,28 +1509,9 @@ const PembukaanPage = () => {
                   </p>
                 </div>
                 <div className="col-span-2">
-                  <p className="text-sm font-medium text-gray-700">
-                    Keterangan
-                  </p>
+                  <p className="text-sm font-medium text-gray-700">Keterangan</p>
                   <p className="text-sm text-gray-900">
                     {selectedDetail.keterangan || selectedDetail.detail || "-"}
-                  </p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-sm font-medium text-gray-700">
-                    Dibukukan oleh
-                  </p>
-                  <div className="text-sm text-gray-900 space-y-1">
-                    <p>Nama: {selectedDetail.dibuat_oleh || "-"}</p>
-                    <p>Jabatan: {selectedDetail.jabatan_user || "-"}</p>
-                    <p>ID User: {selectedDetail.id_user || "-"}</p>
-                  </div>
-                </div>
-                {/* Add No Arsip to detail modal */}
-                <div className="col-span-2">
-                  <p className="text-sm font-medium text-gray-700">No Arsip</p>
-                  <p className="text-sm text-gray-900">
-                    {selectedDetail.no_arsip || "-"}
                   </p>
                 </div>
               </div>
