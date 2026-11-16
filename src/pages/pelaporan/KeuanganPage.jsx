@@ -113,7 +113,7 @@ const KeuanganPage = () => {
 
   const getPenandatanganInfo = () => {
     const isPkk = selectedPembukuan === "PKK";
-    let labelPengurus = selectedPembukuan === "keseluruhan" ? "RT/PKK" : selectedPembukuan;
+    let labelPengurus = selectedPembukuan === "keseluruhan" ? "RT" : selectedPembukuan;
 
     const ketuaJabatanTarget = isPkk ? "ketua pkk" : "pak rt";
     const bendaharaJabatanTarget = isPkk ? "bendahara pkk" : "bendahara rt";
