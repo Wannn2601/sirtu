@@ -8,7 +8,7 @@ const IuranWargaPage = () => {
   const [wargaData, setWargaData] = useState([]);
   const [rewardData, setRewardData] = useState([]);
   const [keringananData, setKeringananData] = useState([]);
-  const [pengurusList, setPengurusList] = useState([]); // 🟢 State untuk data pengurus RT/PKK
+  const [pengurusList, setPengurusList] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [reportType, setReportType] = useState("keseluruhan");
@@ -26,7 +26,7 @@ const IuranWargaPage = () => {
         firestoreService.getAll("rewardSadarIW"),
         firestoreService.getAll("keringananIUR"),
         firestoreService.getAll("iurRates"),
-        firestoreService.getAll("pengurusRT"), // 🟢 Ambil data pengurus dari Firebase
+        firestoreService.getAll("pengurusRT"),
       ]);
       setWargaData(kkResult || []);
       setRewardData(rewards || []);
@@ -44,7 +44,6 @@ const IuranWargaPage = () => {
     loadAllData();
   }, []);
 
-  // 🟢 Fungsi helper untuk mendeteksi penandatangan bendahara aktif
   const getPenandatanganInfo = () => {
     const bendahara = pengurusList.find(
       (p) =>
@@ -61,35 +60,31 @@ const IuranWargaPage = () => {
     const key = `${monthIndex}-${year}`;
     const keyZeroPad = `${String(monthIndex).padStart(2, "0")}-${year}`;
 
-    // 1. Cari rate yang persis sesuai bulan & tahun tersebut
     let rate = iurRates.find((r) => {
       const formatted = (r.bulan_berlaku || "").replace(/^(\d{1})-/, "$1-");
       return formatted === key || formatted === keyZeroPad || (Number(r.bulan) === monthIndex && Number(r.tahun) === year);
     });
 
-    // 2. Jika tidak ditemukan, ambil rate dari bulan/tahun terdekat sebelumnya (fallback ke iuran terakhir yang diset)
     if (!rate && iurRates.length > 0) {
-      // Urutkan iurRates berdasarkan waktu/bulan
       const sortedRates = [...iurRates].sort((a, b) => {
         const [mA, yA] = (a.bulan_berlaku || "1-2026").split("-").map(Number);
         const [mB, yB] = (b.bulan_berlaku || "1-2026").split("-").map(Number);
         return (yA * 12 + mA) - (yB * 12 + mB);
       });
 
-      // Cari rate terakhir yang tanggal/bulannya di bawah atau sama dengan bulan ini
       const validRates = sortedRates.filter(r => {
         const [m, y] = (r.bulan_berlaku || "1-2026").split("-").map(Number);
         return (y * 12 + m) <= (year * 12 + monthIndex);
       });
 
       if (validRates.length > 0) {
-        rate = validRates[validRates.length - 1]; // Ambil yang paling mendekati / terakhir
+        rate = validRates[validRates.length - 1];
       } else {
-        rate = sortedRates[0]; // Fallback mutlak ke rate pertama
+        rate = sortedRates[0];
       }
     }
 
-    return rate ? Number(rate.besaran_iuran) || 0 : 15000; // Default fallback aman 15000 jika kosong total
+    return rate ? Number(rate.besaran_iuran) || 0 : 15000;
   };
 
   function expandRange(startKey, endKey) {
@@ -127,7 +122,6 @@ const IuranWargaPage = () => {
       const namaKK = warga.nama_kepala_keluarga || warga.nama;
       const pembukuan = warga.pembukuan || "RT";
 
-      // 1. CEK REWARD
       for (const reward of rewardData) {
         if ((reward.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase()) continue;
         if (reward.kepalaWarga?.toLowerCase() !== namaKK?.toLowerCase()) continue;
@@ -144,7 +138,6 @@ const IuranWargaPage = () => {
         }
       }
 
-      // 2. KERINGANAN / PEMBEBASAN / PENGHAPUSAN
       for (const k of keringananData) {
         if ((k.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase()) continue;
         if (k.kepalaWarga?.toLowerCase() !== namaKK?.toLowerCase()) continue;
@@ -257,9 +250,8 @@ const IuranWargaPage = () => {
   }, [wargaData, selectedYear, rewardData, keringananData, iurRates]);
 
   const enrichData = useMemo(() => {
-    // Ambil bulan saat ini (1 - 12). Jika tahun yang dipilih bukan tahun berjalan, sesuaikan.
     const currentRealYear = new Date().getFullYear();
-    const currentRealMonth = new Date().getMonth() + 1; // 1 = Januari, 11 = November, dst.
+    const currentRealMonth = new Date().getMonth() + 1;
 
     return combinedData.map((item) => {
       let totalTunggakan = 0;
@@ -268,14 +260,11 @@ const IuranWargaPage = () => {
       let totalDibayar = 0;
 
       monthKeys.forEach((monthKey, index) => {
-        const monthNumber = index + 1; // 1 sampai 12
+        const monthNumber = index + 1;
         const p = item.payments[monthKey];
         const nominalRate = p.originalAmount || getNominalForMonth(monthKey, selectedYear);
 
-        // ATURAN: Jika tahun buku yang dipilih adalah tahun ini, 
-        // bulan yang melebihi bulan berjalan (misal: November & Desember) belum masuk sebagai tunggakan.
         const isFutureMonthInCurrentYear = (selectedYear === currentRealYear && monthNumber >= currentRealMonth);
-        // Catatan: Jika tahun buku di bawah tahun sekarang (tahun lalu), semua 12 bulan dihitung tunggakan jika belum bayar.
         const isPastOrCurrentYear = selectedYear < currentRealYear;
 
         if (p.isPembebasan || p.isPenghapusan) {
@@ -288,11 +277,10 @@ const IuranWargaPage = () => {
             totalTunggakan += p.amount > 0 ? p.amount : nominalRate;
           }
         } else if (p.isReward) {
-          // Reward tidak masuk tunggakan / dibayar
+          // Reward
         } else if (p.status === "lunas") {
           totalDibayar += p.amount;
         } else {
-          // Hanya hitung tunggakan jika bulan tersebut sudah lewat atau sudah berjalan (bukan bulan masa depan di tahun ini)
           if (isPastOrCurrentYear || !isFutureMonthInCurrentYear) {
             totalTunggakan += nominalRate;
           }
@@ -337,12 +325,12 @@ const IuranWargaPage = () => {
   };
 
   const getPaymentStatus = (payment) => {
-    if (payment.isReward) return "bg-blue-200 text-blue-800 font-semibold";
-    if (payment.isPembebasan) return "bg-purple-200 text-purple-800 font-semibold";
-    if (payment.isPenghapusan) return "bg-gray-300 text-gray-800 font-semibold";
-    if (payment.isKeringanan) return "bg-yellow-200 text-yellow-800 font-semibold";
-    if (payment.status === "lunas") return "bg-green-200 text-green-800 font-semibold";
-    return "bg-red-200 text-red-800 font-semibold";
+    if (payment.isReward) return "bg-sky-100 text-sky-800 font-semibold shadow-sm";
+    if (payment.isPembebasan) return "bg-purple-100 text-purple-800 font-semibold shadow-sm";
+    if (payment.isPenghapusan) return "bg-slate-200 text-slate-800 font-semibold shadow-sm";
+    if (payment.isKeringanan) return "bg-amber-100 text-amber-800 font-semibold shadow-sm";
+    if (payment.status === "lunas") return "bg-emerald-100 text-emerald-800 font-semibold shadow-sm";
+    return "bg-rose-50 text-rose-600 border border-rose-100";
   };
 
   const getPaymentStatusSymbol = (payment) => {
@@ -354,172 +342,241 @@ const IuranWargaPage = () => {
     return "X";
   };
 
-  const renderKeseluruhanTable = () => (
-    <div>
-      <div className="text-center mb-6">
-        <h2 className="text-lg font-bold">LAPORAN IURAN WAJIB WARGA TAHUN {selectedYear}</h2>
-        <h3 className="text-base font-semibold">RT 05 RW 08 KELURAHAN PADANGSARI</h3>
-        <p className="text-sm">Per: {new Date().toLocaleDateString("id-ID")}</p>
+  const renderPaginationFooter = () => (
+    <div className="mt-6 px-6 py-4 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4">
+      <div className="flex items-center gap-3 text-sm text-slate-600">
+        <span className="font-medium">Show:</span>
+        <select
+          value={itemsPerPage}
+          onChange={(e) => {
+            setItemsPerPage(Number.parseInt(e.target.value));
+            setCurrentPage(1);
+          }}
+          className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-slate-700"
+        >
+          <option value={5}>5</option>
+          <option value={10}>10</option>
+          <option value={25}>25</option>
+          <option value={50}>50</option>
+        </select>
+        <span className="text-slate-500">data per halaman</span>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full border-collapse border border-gray-300">
-          <thead>
-            <tr>
-              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">NO</th>
-              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Nama KK</th>
-              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Alamat</th>
-              <th colSpan={12} className="border border-gray-300 px-4 py-2 bg-blue-50 text-center">Bulan</th>
-              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Jml<br />Tunggakan</th>
-              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Pembebasan</th>
-              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Keringanan</th>
-              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Total<br />Dibayar</th>
-            </tr>
-            <tr>
-              {months.map((month) => (
-                <th key={month} className="border border-gray-300 px-2 py-1 bg-blue-50 text-xs">{month}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {paginatedData.map((item, index) => (
-              <tr key={item.id}>
-                <td className="border border-gray-300 px-4 py-2 text-center">{startIndex + index + 1}</td>
-                <td className="border border-gray-300 px-4 py-2">{item.nama_kk}</td>
-                <td className="border border-gray-300 px-4 py-2">{item.alamat}</td>
-                {monthKeys.map((monthKey) => {
-                  const payment = item.payments?.[monthKey] || { status: "belum_bayar" };
-                  return (
-                    <td key={monthKey} className={`border border-gray-300 px-2 py-1 text-center text-xs ${getPaymentStatus(payment)}`}>
-                      {getPaymentStatusSymbol(payment)}
-                    </td>
-                  );
-                })}
-                <td className="border border-gray-300 px-4 py-2 text-right text-red-600 font-semibold">
-                  {formatCurrency(item.total_tunggakan)}
-                </td>
-                <td className="border border-gray-300 px-4 py-2 text-right text-gray-600">
-                  {formatCurrency(item.pembebasan)}
-                </td>
-                <td className="border border-gray-300 px-4 py-2 text-right text-yellow-600">
-                  {formatCurrency(item.keringanan)}
-                </td>
-                <td className="border border-gray-300 px-4 py-2 text-right text-green-600 font-semibold">
-                  {formatCurrency(item.total_dibayar)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="text-sm text-slate-600 font-medium">
+        Menampilkan <span className="text-slate-900 font-semibold">{filteredData.length > 0 ? startIndex + 1 : 0}</span> sampai{" "}
+        <span className="text-slate-900 font-semibold">{Math.min(startIndex + itemsPerPage, filteredData.length)}</span> dari{" "}
+        <span className="text-slate-900 font-semibold">{filteredData.length}</span> data
+      </div>
 
-        {/* 🟢 Tanda Tangan Dinamis */}
-        <div className="mt-8 flex justify-end">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+          disabled={currentPage === 1}
+          className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium bg-white text-slate-700 hover:bg-slate-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+        >
+          ‹ Prev
+        </button>
+        <div className="px-3 py-2 bg-indigo-50 text-indigo-700 font-semibold rounded-lg text-sm border border-indigo-100">
+          {currentPage} / {totalPages || 1}
+        </div>
+        <button
+          onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+          disabled={currentPage === totalPages || totalPages === 0}
+          className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium bg-white text-slate-700 hover:bg-slate-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+        >
+          Next ›
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderKeseluruhanTable = () => (
+    <div>
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden p-6">
+        <div className="text-center mb-6">
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight">LAPORAN IURAN WAJIB WARGA TAHUN {selectedYear}</h2>
+          <h3 className="text-base font-semibold text-indigo-600 mt-1">RT 05 RW 08 KELURAHAN PADANGSARI</h3>
+          <p className="text-xs text-slate-400 mt-1">Per: {new Date().toLocaleDateString("id-ID")}</p>
+        </div>
+
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <table className="min-w-full border-collapse bg-white text-left text-sm">
+            <thead>
+              <tr className="bg-slate-900 text-white">
+                <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider border-r border-slate-700">NO</th>
+                <th rowSpan={2} className="px-4 py-3 font-semibold text-xs tracking-wider border-r border-slate-700">Nama KK</th>
+                <th rowSpan={2} className="px-4 py-3 font-semibold text-xs tracking-wider border-r border-slate-700">Alamat</th>
+                <th colSpan={12} className="px-4 py-2 font-semibold text-center text-xs tracking-wider bg-indigo-600 border-b border-indigo-500">Bulan Pembayaran</th>
+                <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider border-l border-r border-slate-700">Jml<br />Tunggakan</th>
+                <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider border-r border-slate-700">Pembebasan</th>
+                <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider border-r border-slate-700">Keringanan</th>
+                <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider">Total<br />Dibayar</th>
+              </tr>
+              <tr className="bg-slate-800 text-slate-200 text-xs">
+                {months.map((month) => (
+                  <th key={month} className="px-2 py-2 text-center border-r border-slate-700 font-medium">{month}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 text-slate-700">
+              {paginatedData.map((item, index) => (
+                <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                  <td className="px-4 py-3 text-center font-medium text-slate-500 border-r border-slate-200">{startIndex + index + 1}</td>
+                  <td className="px-4 py-3 font-semibold text-slate-900 border-r border-slate-200">{item.nama_kk}</td>
+                  <td className="px-4 py-3 text-slate-600 text-xs border-r border-slate-200">{item.alamat}</td>
+                  {monthKeys.map((monthKey) => {
+                    const payment = item.payments?.[monthKey] || { status: "belum_bayar" };
+                    return (
+                      <td key={monthKey} className={`px-2 py-2 text-center text-xs border-r border-slate-200 ${getPaymentStatus(payment)}`}>
+                        {getPaymentStatusSymbol(payment)}
+                      </td>
+                    );
+                  })}
+                  <td className="px-4 py-3 text-right font-bold text-rose-600 border-r border-slate-200 bg-rose-50/30">
+                    {formatCurrency(item.total_tunggakan)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-slate-600 border-r border-slate-200">
+                    {formatCurrency(item.pembebasan)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-amber-600 border-r border-slate-200">
+                    {formatCurrency(item.keringanan)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-emerald-600 bg-emerald-50/30">
+                    {formatCurrency(item.total_dibayar)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Tanda Tangan */}
+        <div className="mt-10 flex justify-end">
           <div className="text-center">
-            <p>Semarang, {new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
-            <p className="mt-1">Bendahara</p>
-            <div className="mt-16 border-b border-gray-400 w-48"></div>
-            <p className="mt-2 font-bold underline">({currentTtd.namaBendahara})</p>
+            <p className="text-sm text-slate-600">Semarang, {new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
+            <p className="mt-1 text-sm font-medium text-slate-700">Bendahara</p>
+            <div className="mt-16 border-b border-slate-400 w-48 mx-auto"></div>
+            <p className="mt-2 font-bold text-slate-900 underline">({currentTtd.namaBendahara})</p>
           </div>
         </div>
       </div>
+
+      {/* Kontrol Pagination & Show dipindah di bawah tabel */}
+      {renderPaginationFooter()}
     </div>
   );
 
   const renderPerWargaTable = () => {
     const selectedWargaData = filteredData.find((item) => item.nama_kk === selectedWarga);
-    if (!selectedWargaData) return <p className="text-center py-8">Pilih nama warga terlebih dahulu</p>;
+    if (!selectedWargaData) return <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-500 font-medium">Pilih nama warga terlebih dahulu pada filter di atas</div>;
 
     return (
       <div>
-        <div className="text-center mb-6">
-          <h2 className="text-lg font-bold">LAPORAN IURAN WAJIB WARGA</h2>
-          <h3 className="text-base font-semibold">RT 05 RW 08 KELURAHAN PADANGSARI</h3>
-          <p className="text-sm">Per: {new Date().toLocaleDateString("id-ID")}</p>
-        </div>
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden p-6">
+          <div className="text-center mb-6">
+            <h2 className="text-xl font-bold text-slate-800 tracking-tight">LAPORAN IURAN WAJIB WARGA</h2>
+            <h3 className="text-base font-semibold text-indigo-600 mt-1">RT 05 RW 08 KELURAHAN PADANGSARI</h3>
+            <p className="text-xs text-slate-400 mt-1">Per: {new Date().toLocaleDateString("id-ID")}</p>
+          </div>
 
-        <div className="mb-4">
-          <p><strong>Nama Kepala Keluarga:</strong> {selectedWargaData.nama_kk}</p>
-          <p><strong>Alamat:</strong> {selectedWargaData.alamat}</p>
-        </div>
+          <div className="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col sm:flex-row justify-between gap-2">
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Nama Kepala Keluarga</p>
+              <p className="text-base font-bold text-slate-900 mt-0.5">{selectedWargaData.nama_kk}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Alamat</p>
+              <p className="text-sm font-medium text-slate-700 mt-0.5">{selectedWargaData.alamat}</p>
+            </div>
+          </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full border-collapse border border-gray-300">
-            <thead>
-              <tr>
-                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">NO</th>
-                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Tahun</th>
-                <th colSpan={12} className="border border-gray-300 px-4 py-2 bg-blue-50 text-center">Bulan</th>
-                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Jml<br />Tunggakan</th>
-                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Pembebasan</th>
-                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Keringanan</th>
-                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Total<br />Dibayar</th>
-              </tr>
-              <tr>
-                {months.map((month) => (
-                  <th key={month} className="border border-gray-300 px-2 py-1 bg-blue-50 text-xs">{month}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="border border-gray-300 px-4 py-2 text-center">1</td>
-                <td className="border border-gray-300 px-4 py-2">{selectedWargaData.tahun}</td>
-                {monthKeys.map((monthKey) => {
-                  const payment = selectedWargaData.payments?.[monthKey] || { status: "belum_bayar" };
-                  return (
-                    <td key={monthKey} className={`border border-gray-300 px-2 py-1 text-center text-xs ${getPaymentStatus(payment)}`}>
-                      {getPaymentStatusSymbol(payment)}
-                    </td>
-                  );
-                })}
-                <td className="border border-gray-300 px-4 py-2 text-right text-red-600 font-semibold">
-                  {formatCurrency(selectedWargaData.total_tunggakan)}
-                </td>
-                <td className="border border-gray-300 px-4 py-2 text-right text-gray-600">
-                  {formatCurrency(selectedWargaData.pembebasan)}
-                </td>
-                <td className="border border-gray-300 px-4 py-2 text-right text-yellow-600">
-                  {formatCurrency(selectedWargaData.keringanan)}
-                </td>
-                <td className="border border-gray-300 px-4 py-2 text-right text-green-600 font-semibold">
-                  {formatCurrency(selectedWargaData.total_dibayar)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="min-w-full border-collapse bg-white text-left text-sm">
+              <thead>
+                <tr className="bg-slate-900 text-white">
+                  <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider border-r border-slate-700">NO</th>
+                  <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider border-r border-slate-700">Tahun</th>
+                  <th colSpan={12} className="px-4 py-2 font-semibold text-center text-xs tracking-wider bg-indigo-600 border-b border-indigo-500">Bulan Pembayaran</th>
+                  <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider border-l border-r border-slate-700">Jml<br />Tunggakan</th>
+                  <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider border-r border-slate-700">Pembebasan</th>
+                  <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider border-r border-slate-700">Keringanan</th>
+                  <th rowSpan={2} className="px-4 py-3 font-semibold text-center text-xs tracking-wider">Total<br />Dibayar</th>
+                </tr>
+                <tr className="bg-slate-800 text-slate-200 text-xs">
+                  {months.map((month) => (
+                    <th key={month} className="px-2 py-2 text-center border-r border-slate-700 font-medium">{month}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 text-slate-700">
+                <tr>
+                  <td className="px-4 py-3 text-center font-medium text-slate-500 border-r border-slate-200">1</td>
+                  <td className="px-4 py-3 text-center font-semibold text-slate-900 border-r border-slate-200">{selectedWargaData.tahun}</td>
+                  {monthKeys.map((monthKey) => {
+                    const payment = selectedWargaData.payments?.[monthKey] || { status: "belum_bayar" };
+                    return (
+                      <td key={monthKey} className={`px-2 py-2 text-center text-xs border-r border-slate-200 ${getPaymentStatus(payment)}`}>
+                        {getPaymentStatusSymbol(payment)}
+                      </td>
+                    );
+                  })}
+                  <td className="px-4 py-3 text-right font-bold text-rose-600 border-r border-slate-200 bg-rose-50/30">
+                    {formatCurrency(selectedWargaData.total_tunggakan)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-slate-600 border-r border-slate-200">
+                    {formatCurrency(selectedWargaData.pembebasan)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-amber-600 border-r border-slate-200">
+                    {formatCurrency(selectedWargaData.keringanan)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-emerald-600 bg-emerald-50/30">
+                    {formatCurrency(selectedWargaData.total_dibayar)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-        {/* 🟢 Tanda Tangan Dinamis */}
-        <div className="mt-8 flex justify-end">
-          <div className="text-center">
-            <p>Semarang, {new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
-            <p className="mt-1">Bendahara</p>
-            <div className="mt-16 border-b border-gray-400 w-48"></div>
-            <p className="mt-2 font-bold underline">({currentTtd.namaBendahara})</p>
+          {/* Tanda Tangan */}
+          <div className="mt-10 flex justify-end">
+            <div className="text-center">
+              <p className="text-sm text-slate-600">Semarang, {new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
+              <p className="mt-1 text-sm font-medium text-slate-700">Bendahara</p>
+              <div className="mt-16 border-b border-slate-400 w-48 mx-auto"></div>
+              <p className="mt-2 font-bold text-slate-900 underline">({currentTtd.namaBendahara})</p>
+            </div>
           </div>
         </div>
+
+        {/* Kontrol Pagination & Show dipindah di bawah tabel */}
+        {renderPaginationFooter()}
       </div>
     );
   };
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">Laporan Iuran Warga</h1>
-        <p className="text-gray-600">Kelola laporan iuran warga dengan integrasi reward dan keringanan</p>
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Laporan Iuran Warga</h1>
+          <p className="text-slate-500 text-sm mt-0.5">Kelola laporan iuran warga dengan integrasi reward dan keringanan secara transparan</p>
+        </div>
       </div>
 
       {loading ? (
-        <div className="text-center py-8"><p>Loading data...</p></div>
+        <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-sm">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mx-auto mb-3"></div>
+          <p className="text-slate-500 font-medium">Memuat data laporan...</p>
+        </div>
       ) : (
         <>
-          <div className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-end">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Tahun Buku</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5">Tahun Buku</label>
               <select
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(Number.parseInt(e.target.value))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium text-slate-800"
               >
                 {[2023, 2024, 2025, 2026].map((year) => (
                   <option key={year} value={year}>{year}</option>
@@ -528,14 +585,14 @@ const IuranWargaPage = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Pelaporan</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5">Pelaporan</label>
               <select
                 value={reportType}
                 onChange={(e) => {
                   setReportType(e.target.value);
                   if (e.target.value === "keseluruhan") setSelectedWarga("");
                 }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium text-slate-800"
               >
                 <option value="keseluruhan">Keseluruhan Warga</option>
                 <option value="per_warga">Per Warga</option>
@@ -544,11 +601,11 @@ const IuranWargaPage = () => {
 
             {reportType === "per_warga" && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Nama Warga</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5">Nama Warga</label>
                 <select
                   value={selectedWarga}
                   onChange={(e) => setSelectedWarga(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium text-slate-800"
                   required
                 >
                   <option value="">Pilih Nama Warga</option>
@@ -560,59 +617,16 @@ const IuranWargaPage = () => {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Cari Data</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5">Cari Data</label>
               <input
                 type="text"
                 placeholder="Cari nama KK atau alamat..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
               />
             </div>
           </div>
-
-          {reportType === "keseluruhan" && (
-            <div className="mb-4 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600">Show:</span>
-                <select
-                  value={itemsPerPage}
-                  onChange={(e) => {
-                    setItemsPerPage(Number.parseInt(e.target.value));
-                    setCurrentPage(1);
-                  }}
-                  className="px-2 py-1 border border-gray-300 rounded text-sm"
-                >
-                  <option value={5}>5</option>
-                  <option value={10}>10</option>
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                </select>
-              </div>
-
-              <div className="text-sm text-gray-600">
-                Menampilkan {startIndex + 1} sampai {Math.min(startIndex + itemsPerPage, filteredData.length)} dari {filteredData.length} data
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
-                >
-                  ‹
-                </button>
-                <span className="text-sm">{currentPage} / {totalPages || 1}</span>
-                <button
-                  onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
-                >
-                  ›
-                </button>
-              </div>
-            </div>
-          )}
 
           {reportType === "keseluruhan" ? renderKeseluruhanTable() : renderPerWargaTable()}
         </>
