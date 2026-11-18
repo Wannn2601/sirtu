@@ -18,42 +18,14 @@ const KeuanganPage = () => {
 
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const [selectedDay, setSelectedDay] = useState(""); // 🟢 Filter angka tanggal (1-31)
   const [selectedPembukuan, setSelectedPembukuan] = useState("RT");
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
-  const [selectedTanggalPerlaporan, setSelectedTanggalPerlaporan] = useState(
-    new Date().toISOString().split("T")[0]
-  );
-
   const [selectedJenisLaporan, setSelectedJenisLaporan] = useState("keuangan"); 
   const [userData, setUserData] = useState(null);
-
-  useEffect(() => {
-    const today = new Date();
-    const currentMonthValue = today.getMonth() + 1;
-    const currentYearValue = today.getFullYear();
-
-    if (
-      selectedYear > currentYearValue ||
-      (selectedYear === currentYearValue &&
-        Number.parseInt(selectedMonth) > currentMonthValue)
-    ) {
-      setSelectedTanggalPerlaporan(today.toISOString().split("T")[0]);
-    } else {
-      const selectedDate = new Date(selectedTanggalPerlaporan);
-      if (
-        selectedDate.getFullYear() !== selectedYear ||
-        (selectedDate.getMonth() + 1).toString().padStart(2, "0") !==
-          selectedMonth
-      ) {
-        if (selectedMonth === "keseluruhan") {
-          setSelectedTanggalPerlaporan(today.toISOString().split("T")[0]);
-        }
-      }
-    }
-  }, [selectedYear, selectedMonth, selectedTanggalPerlaporan]);
 
   const loadAllData = async () => {
     try {
@@ -77,7 +49,8 @@ const KeuanganPage = () => {
           kecamatan_client: currentUser.kecamatan || "",
           kota_client: currentUser.kabupaten_kota || currentUser.kota || "",
           provincia_client: currentUser.Provinsi || currentUser.provinsi || "",
-          nama: currentUser.nama || "",
+          nama: currentUser.nama || currentUser.username || "Administrator",
+          jabatan: currentUser.jabatan || currentUser.level || "Bendahara",
         });
       }
 
@@ -87,23 +60,9 @@ const KeuanganPage = () => {
         firestoreService.getAll("subRekeningKegiatan"),
       ]);
 
-      const mergedRekening = [
-        ...defaultRekenings.filter(
-          (def) => !rekeningData.some((d) => d.id === def.id)
-        ),
-        ...rekeningData,
-      ];
-
-      const mergedSubRekening = [
-        ...defaultSubRekenings.filter(
-          (def) => !subRekeningData.some((d) => d.id === def.id)
-        ),
-        ...subRekeningData,
-      ];
-
       setLaporanKeuanganData(laporanData);
-      setRekeningKegiatanData(mergedRekening);
-      setSubRekeningKegiatanData(mergedSubRekening);
+      setRekeningKegiatanData(rekeningData);
+      setSubRekeningKegiatanData(subRekeningData);
     } catch (error) {
       console.error("Error loading financial data:", error);
     } finally {
@@ -113,7 +72,7 @@ const KeuanganPage = () => {
 
   const getPenandatanganInfo = () => {
     const isPkk = selectedPembukuan === "PKK";
-    let labelPengurus = selectedPembukuan === "keseluruhan" ? "RT" : selectedPembukuan;
+    let labelPengurus = selectedPembukuan === "keseluruhan" ? "RT/PKK" : selectedPembukuan;
 
     const ketuaJabatanTarget = isPkk ? "ketua pkk" : "pak rt";
     const bendaharaJabatanTarget = isPkk ? "bendahara pkk" : "bendahara rt";
@@ -144,14 +103,9 @@ const KeuanganPage = () => {
     };
   };
 
-  const defaultRekenings = [
-    { id: "1", kelompok_pembukuan: "Kas", pembukuan: "RT", status: "aktif", is_locked: true },
-    { id: "2", kelompok_pembukuan: "Kas", pembukuan: "PKK", status: "aktif", is_locked: true },
-  ];
-
   const defaultSubRekenings = [
     { id: "1.1", uraian: "Silpa Warga Tahun Lalu", pembukuan: "RT", id_kelompok: "1", is_locked: true },
-    { id: "1.2", uraian: "Iuran Wajib Warga", pembukuan: "RT", id_kelompok: "1", is_locked: true },
+    { id: "1.2", uraian: "Iuran Pengelolaan Lingkungan (IPL) Warga", pembukuan: "RT", id_kelompok: "1", is_locked: true },
     { id: "2.1", uraian: "Silpa PKK Tahun Lalu", pembukuan: "PKK", id_kelompok: "2", is_locked: true },
     { id: "2.2", uraian: "Iuran Wajib PKK", pembukuan: "PKK", id_kelompok: "2", is_locked: true },
   ];
@@ -175,6 +129,12 @@ const KeuanganPage = () => {
     { value: "11", label: "November" },
     { value: "12", label: "Desember" },
   ];
+
+  // Array angka 1 sampai 31 untuk pilihan filter tanggal
+  const daysOptions = Array.from({ length: 31 }, (_, i) => {
+    const dayNum = i + 1;
+    return { value: String(dayNum).padStart(2, "0"), label: String(dayNum) };
+  });
 
   const pembukaanOptions = [
     { value: "keseluruhan", label: "Keseluruhan (RT & PKK)" },
@@ -204,9 +164,11 @@ const KeuanganPage = () => {
       });
     }
 
-    if (selectedMonth === "keseluruhan" && selectedTanggalPerlaporan) {
+    // 🟢 Filter berdasarkan angka tanggal (1-31) jika dipilih
+    if (selectedDay) {
       filteredLaporanData = filteredLaporanData.filter((item) => {
-        return new Date(item.tanggal) <= new Date(selectedTanggalPerlaporan);
+        const [yearStr, monthStr, dayStr] = (item.tanggal || "").split("-");
+        return dayStr === selectedDay;
       });
     }
 
@@ -229,7 +191,6 @@ const KeuanganPage = () => {
       });
     }
 
-    // 🟢 Gabungkan sumber sub-rekening untuk mapping nama kelompok pembukuan
     const allSubRekenings = [
       ...defaultSubRekenings,
       ...subRekeningKegiatanData,
@@ -238,7 +199,6 @@ const KeuanganPage = () => {
     filteredLaporanData.forEach((trans) => {
       const jenisPembukuan = trans.jenis_pembukuan || "";
 
-      // 🟢 Cocokkan id_sub_rekening_kegiatan untuk mendapatkan nama kelompok/uraian
       const matchedSub = allSubRekenings.find(
         (sr) => sr.id?.toString() === trans.id_sub_rekening_kegiatan?.toString()
       );
@@ -385,6 +345,15 @@ const KeuanganPage = () => {
     }
   };
 
+  // 🟢 Mendapatkan tanggal penandatanganan (mengikuti filter tanggal jika dipilih)
+  const getTanggalTandaTangan = () => {
+    if (selectedDay) {
+      const monthToUse = selectedMonth === "keseluruhan" ? currentMonth : selectedMonth;
+      return `${selectedYear}-${monthToUse}-${selectedDay}`;
+    }
+    return new Date().toISOString().split("T")[0];
+  };
+
   const exportToExcel = async () => {
     const result = await Swal.fire({
       title: "Export ke Excel",
@@ -408,9 +377,7 @@ const KeuanganPage = () => {
         Jumlah: "",
       });
       exportData.push({
-        Tanggal: `RT ${userData?.rt_client || "..."} RW ${
-          userData?.rw_client || "..."
-        } Kelurahan ${userData?.kelurahan_client || "..."}`,
+        Tanggal: `RT ${userData?.rt_client || "..."} RW ${userData?.rw_client || "..."} Kelurahan ${userData?.kelurahan_client || "..."}`,
         Uraian: "",
         "Rp.": "",
         Jumlah: "",
@@ -422,9 +389,9 @@ const KeuanganPage = () => {
         Jumlah: "",
       });
       exportData.push({
-        Tanggal: `Bulan Pelaporan: ${
-          months.find((m) => m.value === selectedMonth)?.label
-        } ${selectedYear}`,
+        Tanggal: selectedDay
+          ? `Tanggal Pelaporan: ${selectedDay} ${months.find((m) => m.value === selectedMonth)?.label || ""} ${selectedYear}`
+          : `Bulan Pelaporan: ${months.find((m) => m.value === selectedMonth)?.label} ${selectedYear}`,
         Uraian: "",
         "Rp.": "",
         Jumlah: "",
@@ -436,9 +403,7 @@ const KeuanganPage = () => {
       XLSX.utils.book_append_sheet(wb, ws, "Laporan Keuangan");
       XLSX.writeFile(
         wb,
-        `Laporan_Keuangan_${
-          months.find((m) => m.value === selectedMonth)?.label
-        }_${selectedYear}.xlsx`
+        `Laporan_Keuangan_${selectedYear}_${selectedMonth}.xlsx`
       );
 
       Swal.fire({
@@ -473,6 +438,18 @@ const KeuanganPage = () => {
 
     try {
       const ttd = getPenandatanganInfo();
+      const tglTTD = getTanggalTandaTangan();
+      const downloadTimestamp = new Date().toLocaleString("id-ID", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+      const currentUrl = window.location.href;
+      const currentUserNama = userData?.nama || "Administrator";
 
       let tableRows = "";
       tableRows += `
@@ -481,7 +458,7 @@ const KeuanganPage = () => {
         </tr>
       `;
 
-      if (selectedMonth === "01") {
+      if (selectedMonth === "01" && !selectedDay) {
         tableRows += `
           <tr>
             <td style="border: 1px solid #000; padding: 4px; font-size: 10px;"></td>
@@ -522,7 +499,7 @@ const KeuanganPage = () => {
 
       tableRows += `
         <tr style="background-color: #fef08a;">
-          <td colspan="2" style="border: 1px solid #000; padding: 4px; font-size: 10px; font-weight: bold;">Jumlah Penerimaan Bulan Ini</td>
+          <td colspan="2" style="border: 1px solid #000; padding: 4px; font-size: 10px; font-weight: bold;">Jumlah Penerimaan</td>
           <td style="border: 1px solid #000; padding: 4px; font-size: 10px; text-align: center;"></td>
           <td style="border: 1px solid #000; padding: 4px; font-size: 10px; text-align: right; font-weight: bold;">${formatCurrency(totalPenerimaan)}</td>
         </tr>
@@ -564,7 +541,7 @@ const KeuanganPage = () => {
 
       tableRows += `
         <tr style="background-color: #fef08a;">
-          <td colspan="2" style="border: 1px solid #000; padding: 4px; font-size: 10px; font-weight: bold;">Jumlah Pengeluaran Bulan Ini</td>
+          <td colspan="2" style="border: 1px solid #000; padding: 4px; font-size: 10px; font-weight: bold;">Jumlah Pengeluaran</td>
           <td style="border: 1px solid #000; padding: 4px; font-size: 10px; text-align: center;"></td>
           <td style="border: 1px solid #000; padding: 4px; font-size: 10px; text-align: right; font-weight: bold;">${formatCurrency(totalPengeluaran)}</td>
         </tr>
@@ -580,7 +557,7 @@ const KeuanganPage = () => {
 
       tableRows += `
         <tr style="background-color: #fef08a;">
-          <td colspan="2" style="border: 1px solid #000; padding: 4px; font-size: 10px; font-weight: bold;">IV. Saldo Kas Bulan Ini (I - II) + III</td>
+          <td colspan="2" style="border: 1px solid #000; padding: 4px; font-size: 10px; font-weight: bold;">IV. Saldo Kas (I - II) + III</td>
           <td style="border: 1px solid #000; padding: 4px; font-size: 10px; text-align: center;"></td>
           <td style="border: 1px solid #000; padding: 4px; font-size: 10px; text-align: right; font-weight: bold;">${formatCurrency(saldoKasBulanIni)}</td>
         </tr>
@@ -602,13 +579,31 @@ const KeuanganPage = () => {
               .signature { display: flex; justify-content: space-between; margin-top: 30px; }
               .signature div { font-size: 10px; }
               .signature-space { margin-top: 40px; }
+              /* 🟢 Informasi bagian bawah 1-2 baris, kecil namun terlihat */
+              .footer-info {
+                margin-top: 30px;
+                font-size: 9px;
+                color: #555;
+                border-top: 1px solid #ddd;
+                padding-top: 6px;
+                display: flex;
+                justify-content: space-between;
+                flex-wrap: wrap;
+                gap: 5px;
+              }
             </style>
           </head>
           <body>
             <div class="header">
               <h1>LAPORAN KEUANGAN KAS ${selectedPembukuan.toUpperCase()}</h1>
               <h2>RT ${userData?.rt_client || "..."} RW ${userData?.rw_client || "..."} Kelurahan ${userData?.kelurahan_client || "..."} Kecamatan ${userData?.kecamatan_client || "..."} - Kab/Kota ${userData?.kota_client || "..."}</h2>
-              <p>Bulan Pelaporan: ${months.find((m) => m.value === selectedMonth)?.label} ${selectedYear}</p>
+              <p>
+                ${
+                  selectedDay
+                    ? `Tanggal Pelaporan: ${selectedDay} ${months.find((m) => m.value === selectedMonth)?.label || ""} ${selectedYear}`
+                    : `Bulan Pelaporan: ${months.find((m) => m.value === selectedMonth)?.label} ${selectedYear}`
+                }
+              </p>
             </div>
             
             <table>
@@ -634,12 +629,20 @@ const KeuanganPage = () => {
                 </div>
               </div>
               <div style="text-align: right;">
-                <p>${userData?.kota_client || "..."}, ${formatDate(selectedTanggalPerlaporan)}</p>
+                <p>${userData?.kota_client || "..."}, ${formatDate(tglTTD)}</p>
                 <p><strong>${ttd.labelBendahara}</strong></p>
                 <div class="signature-space">
                   <p><u>${ttd.namaBendahara}</u></p>
                 </div>
               </div>
+            </div>
+
+            <!-- 🟢 Informasi Download Sesuai Permintaan (1-2 baris, kecil, terlihat) -->
+            <div class="footer-info">
+              <span>Situs: ${currentUrl}</span>
+              <span>Waktu: ${downloadTimestamp}</span>
+              <span>Oleh: ${currentUserNama} (${userData?.jabatan})</span>
+              <span>Filter: Kas ${selectedPembukuan} | ${selectedDay ? `Tgl ${selectedDay}/` : ""}${selectedMonth}/${selectedYear}</span>
             </div>
           </body>
         </html>
@@ -666,6 +669,7 @@ const KeuanganPage = () => {
   };
 
   const currentTtd = getPenandatanganInfo();
+  const tglTandatanganDisplay = getTanggalTandaTangan();
 
   return (
     <div className="p-6">
@@ -686,7 +690,8 @@ const KeuanganPage = () => {
         </div>
       ) : (
         <>
-          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* 🟢 Baris Filter dengan Pilihan Angka Tanggal (1-31) */}
+          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Tahun Pembukuan
@@ -716,6 +721,25 @@ const KeuanganPage = () => {
                 {months.map((month) => (
                   <option key={month.value} value={month.value}>
                     {month.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 🟢 Filter Tanggal Angka (1-31) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Tanggal (Opsional)
+              </label>
+              <select
+                value={selectedDay}
+                onChange={(e) => setSelectedDay(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">-- Semua Tanggal --</option>
+                {daysOptions.map((day) => (
+                  <option key={day.value} value={day.value}>
+                    {day.label}
                   </option>
                 ))}
               </select>
@@ -781,7 +805,9 @@ const KeuanganPage = () => {
               </h3>
               <p className="text-sm">{userData?.kota_client || "..."}</p>
               <p className="text-sm font-semibold mt-2">
-                Bulan Pelaporan: {months.find((m) => m.value === selectedMonth)?.label} {selectedYear}
+                {selectedDay
+                  ? `Tanggal Pelaporan: ${selectedDay} ${months.find((m) => m.value === selectedMonth)?.label || ""} ${selectedYear}`
+                  : `Bulan Pelaporan: ${months.find((m) => m.value === selectedMonth)?.label} ${selectedYear}`}
               </p>
             </div>
 
@@ -803,7 +829,7 @@ const KeuanganPage = () => {
                     </td>
                   </tr>
 
-                  {selectedMonth === "01" && (
+                  {selectedMonth === "01" && !selectedDay && (
                     <tr>
                       <td className="border border-gray-400 px-3 py-2 text-sm"></td>
                       <td className="border border-gray-400 px-3 py-2 text-sm">Saldo Kas Tahun Lalu</td>
@@ -839,7 +865,7 @@ const KeuanganPage = () => {
                   })}
 
                   <tr className="bg-yellow-200">
-                    <td colSpan="2" className="border border-gray-400 px-3 py-2 text-sm font-semibold">Jumlah Penerimaan Bulan Ini</td>
+                    <td colSpan="2" className="border border-gray-400 px-3 py-2 text-sm font-semibold">Jumlah Penerimaan</td>
                     <td className="border border-gray-400 px-3 py-2 text-sm text-center"></td>
                     <td className="border border-gray-400 px-3 py-2 text-sm text-right font-bold">{formatCurrency(totalPenerimaan)}</td>
                   </tr>
@@ -878,7 +904,7 @@ const KeuanganPage = () => {
                   })}
 
                   <tr className="bg-yellow-200">
-                    <td colSpan="2" className="border border-gray-400 px-3 py-2 text-sm font-semibold">Jumlah Pengeluaran Bulan Ini</td>
+                    <td colSpan="2" className="border border-gray-400 px-3 py-2 text-sm font-semibold">Jumlah Pengeluaran</td>
                     <td className="border border-gray-400 px-3 py-2 text-sm text-center"></td>
                     <td className="border border-gray-400 px-3 py-2 text-sm text-right font-bold">{formatCurrency(totalPengeluaran)}</td>
                   </tr>
@@ -895,7 +921,7 @@ const KeuanganPage = () => {
                   {/* IV. SALDO KAS BULAN INI */}
                   <tr className="bg-yellow-300">
                     <td colSpan="2" className="border border-gray-400 px-3 py-2 text-sm font-semibold">
-                      IV. Saldo Kas Bulan Ini (I - II) + III
+                      IV. Saldo Kas (I - II) + III
                     </td>
                     <td className="border border-gray-400 px-3 py-2 text-sm text-center"></td>
                     <td className="border border-gray-400 px-3 py-2 text-sm text-right font-bold">{formatCurrency(saldoKasBulanIni)}</td>
@@ -904,6 +930,7 @@ const KeuanganPage = () => {
               </table>
             </div>
 
+            {/* 🟢 Tanda Tangan Sesuai Filter Tanggal */}
             <div className="p-6 border-t border-gray-300">
               <div className="flex justify-between mt-8 text-sm">
                 <div>
@@ -914,12 +941,20 @@ const KeuanganPage = () => {
                   </div>
                 </div>
                 <div className="text-right">
-                  <p>{userData?.kota_client || "..."}, {formatDate(selectedTanggalPerlaporan)}</p>
+                  <p>{userData?.kota_client || "..."}, {formatDate(tglTandatanganDisplay)}</p>
                   <p className="font-semibold">{currentTtd.labelBendahara}</p>
                   <div className="mt-16">
                     <p className="font-bold underline">{currentTtd.namaBendahara}</p>
                   </div>
                 </div>
+              </div>
+
+              {/* 🟢 Informasi Web & Unduhan di Bawah Sendiri (Kecil, Rapi 1-2 Baris) */}
+              <div className="mt-8 pt-3 border-t border-gray-200 text-[10px] text-gray-500 flex justify-between flex-wrap gap-2">
+                <span>Sumber: {typeof window !== "undefined" ? window.location.href : ""}</span>
+                <span>Diunduh: {new Date().toLocaleString("id-ID")}</span>
+                <span>Oleh: {userData?.nama} ({userData?.jabatan})</span>
+                <span>Data: Kas {selectedPembukuan} ({selectedDay ? `Tgl ${selectedDay}/` : ""}{selectedMonth}/{selectedYear})</span>
               </div>
             </div>
           </div>

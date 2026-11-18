@@ -49,7 +49,6 @@ const DataKKPage = () => {
         const data = await firestoreService.getAll("users");
         console.log("Users data:", data);
 
-        // cari user yang punya data wilayah (misalnya level superadmin)
         const wilayahUser = data.find((u) => u.level === "superadmin");
 
         if (wilayahUser) {
@@ -72,10 +71,10 @@ const DataKKPage = () => {
     status_kk: "",
     nama_kepala_keluarga: "",
     nomor_kk: "",
+    no_hp: "", // ✅ tambahan field nomor whatsapp
     tanggal_terbit: "",
     tanggal_daftar: new Date().toISOString().split("T")[0],
 
-    // default tanggal_pindah = +1 tahun dari tanggal daftar
     tanggal_pindah: new Date(
       new Date().setFullYear(new Date().getFullYear() + 1)
     )
@@ -84,7 +83,7 @@ const DataKKPage = () => {
 
     keterangan: "",
     file_gambar: null,
-    file_surat_kontrak: null, // ✅ tambahan field surat kontrak
+    file_surat_kontrak: null,
   });
 
   useEffect(() => {
@@ -112,7 +111,6 @@ const DataKKPage = () => {
     }
   };
 
-  // Fungsi kompres gambar (resize + quality)
   const compressImage = (file, maxWidth = 800, quality = 0.7) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -136,7 +134,6 @@ const DataKKPage = () => {
 
         ctx.drawImage(img, 0, 0, width, height);
 
-        // kompres jadi JPEG
         const compressedDataUrl = canvas.toDataURL("image/jpeg", quality);
         resolve(compressedDataUrl);
       };
@@ -171,11 +168,9 @@ const DataKKPage = () => {
     setShowBlockDropdown(false);
     setBlockSearchTerm("");
 
-    // Find available addresses for selected block
     const blockHousing = housingData.filter((house) => house.blok === block);
     setAvailableAddresses(blockHousing);
 
-    // Clear address selection when block changes
     setFormData((prev) => ({ ...prev, alamat: "", no_rumah: "" }));
   };
 
@@ -184,11 +179,11 @@ const DataKKPage = () => {
       ...prev,
       alamat: housing.alamat,
       no_rumah: housing.nomor_rumah,
-      nama_kepala_keluarga: housing.pemilik, // sync juga ke formData
+      nama_kepala_keluarga: housing.pemilik,
     }));
     setShowAddressDropdown(false);
     setAddressSearchTerm("");
-    setNamaKepala(housing.pemilik); // set namaKepala agar muncul di input
+    setNamaKepala(housing.pemilik);
   };
 
   const handleSendHousingDummyData = async () => {
@@ -284,7 +279,7 @@ const DataKKPage = () => {
         ];
 
         await firestoreService.addBatch("hunian", dummyHousingData);
-        await loadHousingData(); // Reload housing data
+        await loadHousingData();
 
         Swal.fire({
           title: "Berhasil!",
@@ -304,92 +299,6 @@ const DataKKPage = () => {
     }
   };
 
-  const handleSendDummyData = async () => {
-    const result = await Swal.fire({
-      title: "Kirim Data Dummy",
-      text: "Apakah Anda yakin ingin mengirim data dummy KK ke Firebase?",
-      icon: "question",
-      showCancelButton: true,
-      confirmButtonText: "Ya, Kirim",
-      cancelButtonText: "Batal",
-      confirmButtonColor: "#3b82f6",
-      cancelButtonColor: "#6b7280",
-    });
-
-    if (result.isConfirmed) {
-      try {
-        setLoading(true);
-        console.log("[v0] Sending dummy KK data to Firebase...");
-
-        const dummyKKData = [
-          {
-            id_kk: "KK001",
-            nomor_kk: "3201234567890001",
-            nama_kepala_keluarga: "Ahmad Suryadi",
-            alamat: "Jl. Mawar No. 1",
-            blok_hunian: "A01",
-            no_rumah: "01",
-            status_kk: "Tetap",
-            tanggal_daftar_kk: "2024-01-15",
-            tanggal_pindah: null,
-            keterangan: "KK aktif",
-            jumlah_warga: 4,
-            file_kk_surat_pengantar: "kk_001.pdf",
-            file_kontrak: "kontrak_001.pdf",
-          },
-          {
-            id_kk: "KK002",
-            nomor_kk: "3201234567890002",
-            nama_kepala_keluarga: "Budi Santoso",
-            alamat: "Jl. Melati No. 1",
-            blok_hunian: "A02",
-            no_rumah: "01",
-            status_kk: "Kontrak",
-            tanggal_daftar_kk: "2024-02-20",
-            tanggal_pindah: null,
-            keterangan: "KK kontrak 2 tahun",
-            jumlah_warga: 3,
-            file_kk_surat_pengantar: "kk_002.pdf",
-            file_kontrak: "kontrak_002.pdf",
-          },
-          {
-            id_kk: "KK003",
-            nomor_kk: "3201234567890003",
-            nama_kepala_keluarga: "Dewi Sartika",
-            alamat: "Jl. Anggrek No. 1",
-            blok_hunian: "B01",
-            no_rumah: "01",
-            status_kk: "Tetap",
-            tanggal_daftar_kk: "2024-03-10",
-            tanggal_pindah: null,
-            keterangan: "KK baru pindah",
-            jumlah_warga: 5,
-            file_kk_surat_pengantar: "kk_003.pdf",
-            file_kontrak: "kontrak_003.pdf",
-          },
-        ];
-
-        await firestoreService.addBatch("kkData", dummyKKData);
-        await loadKKData(); // Reload data after adding
-
-        Swal.fire({
-          title: "Berhasil!",
-          text: `${dummyKKData.length} data dummy KK berhasil dikirim ke Firebase.`,
-          icon: "success",
-        });
-      } catch (error) {
-        console.error("[v0] Error sending dummy data:", error);
-        Swal.fire({
-          title: "Error!",
-          text: "Gagal mengirim data dummy ke Firebase.",
-          icon: "error",
-        });
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
-
   const handleSave = async () => {
     try {
       setLoading(true);
@@ -397,7 +306,6 @@ const DataKKPage = () => {
       let imageData = formData.file_gambar;
       let kontrakImageData = formData.file_surat_kontrak;
 
-      // Kompres gambar KK
       if (newContractImage instanceof File) {
         kontrakImageData = await compressImage(newContractImage, 800, 0.7);
       } else if (formData.file_surat_kontrak instanceof File) {
@@ -408,12 +316,10 @@ const DataKKPage = () => {
         );
       }
 
-      // Kompres gambar KK
       if (formData.file_gambar instanceof File) {
         imageData = await compressImage(formData.file_gambar, 800, 0.7);
       }
 
-      // Kompres gambar surat kontrak
       if (formData.file_surat_kontrak instanceof File) {
         kontrakImageData = await compressImage(
           formData.file_surat_kontrak,
@@ -422,7 +328,6 @@ const DataKKPage = () => {
         );
       }
 
-      // Cek duplikat nomor KK
       if (kkError) {
         Swal.fire(
           "Error!",
@@ -434,10 +339,10 @@ const DataKKPage = () => {
       }
 
       if (!editingKK) {
-        // Tambah data baru
         const newKK = {
           id_kk: `KK${Date.now()}`,
           nomor_kk: formData.nomor_kk,
+          no_hp: formData.no_hp || "", // ✅ simpan no_hp
           nama_kepala_keluarga: namaKepala,
           alamat: formData.alamat,
           blok_hunian: formData.lokasi_hunian,
@@ -451,7 +356,6 @@ const DataKKPage = () => {
           file_gambar: imageData || null,
           file_surat_kontrak:
             kontrakImageData || editingKK?.file_surat_kontrak || null,
-          // ✅ tambahan data lokasi dari users
           rt: userData?.RT || "",
           rw: userData?.RW || "",
           kelurahan: userData?.Kelurahan || "",
@@ -462,23 +366,21 @@ const DataKKPage = () => {
         };
         await firestoreService.add("kkData", newKK);
       } else {
-        // Update data lama
         const updatedKK = {
           nomor_kk: formData.nomor_kk,
+          no_hp: formData.no_hp || "", // ✅ update no_hp
           nama_kepala_keluarga: namaKepala,
           alamat: formData.alamat,
           blok_hunian: formData.lokasi_hunian,
           no_rumah: formData.no_rumah,
           status_kk: formData.status_kk,
           tanggal_terbit: formData.tanggal_terbit,
-
           tanggal_daftar_kk: formData.tanggal_daftar,
           tanggal_pindah: formData.tanggal_pindah || null,
           keterangan: formData.keterangan || "",
           file_gambar: imageData || editingKK.file_gambar || null,
           file_surat_kontrak:
             kontrakImageData || editingKK?.file_surat_kontrak || null,
-          // ✅ data lokasi dari users
           rt: userData?.RT || "",
           rw: userData?.RW || "",
           kelurahan: userData?.Kelurahan || "",
@@ -525,7 +427,7 @@ const DataKKPage = () => {
       try {
         setLoading(true);
         await firestoreService.delete("kkData", kk.id);
-        await loadKKData(); // Reload data
+        await loadKKData();
         Swal.fire("Berhasil!", "Data KK berhasil dihapus.", "success");
       } catch (error) {
         console.error("[v0] Error deleting KK:", error);
@@ -546,8 +448,8 @@ const DataKKPage = () => {
       status_kk: kk.status_kk || "",
       nama_kepala_keluarga: kk.nama_kepala_keluarga || "",
       nomor_kk: kk.nomor_kk || "",
-      tanggal_terbit:
-        kk.tanggal_terbit || new Date().toISOString().split("T")[0], // ✅ ambil data atau default hari ini
+      no_hp: kk.no_hp || "", // ✅ set no_hp saat edit
+      tanggal_terbit: kk.tanggal_terbit || new Date().toISOString().split("T")[0],
       tanggal_daftar: kk.tanggal_daftar_kk || "",
       tanggal_pindah: kk.tanggal_pindah || "",
       keterangan: kk.keterangan || "",
@@ -581,9 +483,10 @@ const DataKKPage = () => {
       status_kk: "",
       nama_kepala_keluarga: "",
       nomor_kk: "",
+      no_hp: "", // ✅ reset no_hp
       tanggal_terbit: tanggalDaftar,
       tanggal_daftar: tanggalDaftar,
-      tanggal_pindah: tanggalPindah, // ✅ default +1 tahun
+      tanggal_pindah: tanggalPindah,
       keterangan: "",
       file_gambar: null,
       file_surat_kontrak: null,
@@ -596,7 +499,6 @@ const DataKKPage = () => {
     setAddressSearchTerm("");
   };
 
-  // Filter and sort data
   const filteredData = kkData.filter((kk) =>
     Object.values(kk).some((value) =>
       value?.toString().toLowerCase().includes(searchTerm.toLowerCase())
@@ -604,7 +506,6 @@ const DataKKPage = () => {
   );
 
   const sortedData = [...filteredData]
-    // SORT DEFAULT — Nama Kepala Keluarga (A-Z)
     .sort((a, b) =>
       (a.nama_kepala_keluarga || "")
         .trim()
@@ -614,7 +515,6 @@ const DataKKPage = () => {
           "id"
         )
     )
-    // SORT DINAMIS (jika user klik header)
     .sort((a, b) => {
       if (!sortConfig.key) return 0;
       const aValue = a[sortConfig.key] || "";
@@ -629,7 +529,6 @@ const DataKKPage = () => {
         .localeCompare(aValue.toString(), "id", { numeric: true });
     });
 
-  // Pagination
   const totalPages = Math.ceil(sortedData.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedData = sortedData.slice(startIndex, startIndex + itemsPerPage);
@@ -645,7 +544,7 @@ const DataKKPage = () => {
   };
 
   const filteredBlocks = [...new Set(housingData.map((house) => house.blok))]
-    .sort((a, b) => a.localeCompare(b)) // ✅ urutkan A-Z
+    .sort((a, b) => a.localeCompare(b))
     .filter((block) =>
       block.toLowerCase().includes(blockSearchTerm.toLowerCase())
     );
@@ -658,12 +557,10 @@ const DataKKPage = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      // Check if the click is outside the block dropdown and its trigger
       const blockDropdown = document.querySelector(".block-dropdown-container");
       if (blockDropdown && !blockDropdown.contains(event.target)) {
         setShowBlockDropdown(false);
       }
-      // Check if the click is outside the address dropdown and its trigger
       const addressDropdown = document.querySelector(
         ".address-dropdown-container"
       );
@@ -701,14 +598,6 @@ const DataKKPage = () => {
                 <Upload className="w-4 h-4" />
                 Data Hunian Dummy
               </button>
-              {/* <button
-                onClick={handleSendDummyData}
-                disabled={loading}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-              >
-                <Upload className="w-4 h-4" />
-                Kirim Data Dummy
-              </button> */}
               <button
                 onClick={() => setShowAddModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -728,7 +617,7 @@ const DataKKPage = () => {
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                 <input
                   type="text"
-                  placeholder="Cari berdasarkan nama, nomor KK, alamat..."
+                  placeholder="Cari berdasarkan nama, nomor KK, alamat, no. WhatsApp..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -791,6 +680,9 @@ const DataKKPage = () => {
                         </button>
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        No. WhatsApp
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Alamat
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -805,7 +697,6 @@ const DataKKPage = () => {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Gambar
                       </th>
-
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Aksi
                       </th>
@@ -825,6 +716,20 @@ const DataKKPage = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {kk.nama_kepala_keluarga}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {kk.no_hp ? (
+                            <a
+                              href={`https://wa.me/${kk.no_hp.replace(/^0/, "62")}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-green-600 hover:underline font-medium"
+                            >
+                              {kk.no_hp}
+                            </a>
+                          ) : (
+                            "-"
+                          )}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-900">
                           {kk.alamat} No. {kk.no_rumah}
@@ -847,42 +752,40 @@ const DataKKPage = () => {
                           {kk.jumlah_warga || 0}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {kk.file_gambar ? (
-                            <img
-                              src={kk.file_gambar}
-                              alt="Gambar KK"
-                              className="h-12 w-12 object-cover rounded cursor-pointer"
-                              onClick={() =>
-                                Swal.fire({
-                                  imageUrl: kk.file_gambar,
-                                  imageAlt: "Gambar KK",
-                                  showConfirmButton: false,
-                                  showCloseButton: true,
-                                })
-                              }
-                            />
-                          ) : (
-                            "-"
-                          )}
-                          {kk.file_surat_kontrak ? (
-                            <img
-                              src={kk.file_surat_kontrak}
-                              alt="Gambar KK"
-                              className="h-12 w-12 object-cover rounded cursor-pointer"
-                              onClick={() =>
-                                Swal.fire({
-                                  imageUrl: kk.file_surat_kontrak,
-                                  imageAlt: "Gambar KK",
-                                  showConfirmButton: false,
-                                  showCloseButton: true,
-                                })
-                              }
-                            />
-                          ) : (
-                            "-"
-                          )}
+                          <div className="flex gap-2">
+                            {kk.file_gambar ? (
+                              <img
+                                src={kk.file_gambar}
+                                alt="Gambar KK"
+                                className="h-10 w-10 object-cover rounded cursor-pointer border"
+                                onClick={() =>
+                                  Swal.fire({
+                                    imageUrl: kk.file_gambar,
+                                    imageAlt: "Gambar KK",
+                                    showConfirmButton: false,
+                                    showCloseButton: true,
+                                  })
+                                }
+                              />
+                            ) : null}
+                            {kk.file_surat_kontrak ? (
+                              <img
+                                src={kk.file_surat_kontrak}
+                                alt="Surat Kontrak"
+                                className="h-10 w-10 object-cover rounded cursor-pointer border"
+                                onClick={() =>
+                                  Swal.fire({
+                                    imageUrl: kk.file_surat_kontrak,
+                                    imageAlt: "Surat Kontrak",
+                                    showConfirmButton: false,
+                                    showCloseButton: true,
+                                  })
+                                }
+                              />
+                            ) : null}
+                            {!kk.file_gambar && !kk.file_surat_kontrak && "-"}
+                          </div>
                         </td>
-
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <div className="flex items-center gap-2">
                             <button
@@ -1015,7 +918,7 @@ const DataKKPage = () => {
                   onClick={() => {
                     setShowAddModal(false);
                     resetForm();
-                    setNamaKepala(""); // ✅ reset nama kepala keluarga saat tambah baru
+                    setNamaKepala("");
                   }}
                   className="text-gray-400 hover:text-gray-600"
                 >
@@ -1036,7 +939,6 @@ const DataKKPage = () => {
                       const value = e.target.value;
                       setFormData({ ...formData, nomor_kk: value });
 
-                      // cek duplikat (skip kalau sedang edit data yang sama)
                       const isDuplicate = kkData.some(
                         (kk) =>
                           kk.nomor_kk === value &&
@@ -1056,6 +958,21 @@ const DataKKPage = () => {
                   {kkError && (
                     <p className="mt-1 text-sm text-red-600">{kkError}</p>
                   )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    No. WhatsApp / HP
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: 081234567890"
+                    value={formData.no_hp}
+                    onChange={(e) =>
+                      setFormData({ ...formData, no_hp: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
 
                 <div>
@@ -1177,6 +1094,7 @@ const DataKKPage = () => {
                     )}
                   </div>
                 </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     RT
@@ -1336,9 +1254,9 @@ const DataKKPage = () => {
                   />
                 </div>
               </div>
-              <div className="md:col-span-2">
+              <div className="md:col-span-2 mt-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Upload File Kartu Keluarga dalam format JPG Ukuran maks.300KB{" "}
+                  Upload File Kartu Keluarga dalam format JPG Ukuran maks.300KB
                 </label>
                 <input
                   type="file"
@@ -1361,7 +1279,7 @@ const DataKKPage = () => {
                 )}
               </div>
               {formData.status_kk === "Kontrak" && (
-                <div className="md:col-span-2">
+                <div className="md:col-span-2 mt-4">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Upload Surat Kontrak dalam format JPG Ukuran maks.300KB
                   </label>
@@ -1447,6 +1365,21 @@ const DataKKPage = () => {
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="Masukkan nomor KK"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    No. WhatsApp / HP
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.no_hp}
+                    onChange={(e) =>
+                      setFormData({ ...formData, no_hp: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="Contoh: 081234567890"
                   />
                 </div>
 
@@ -1734,8 +1667,6 @@ const DataKKPage = () => {
                     Ganti Gambar Kartu Keluarga maks. 300KB
                   </label>
 
-                  {/* Preview gambar lama jika ada */}
-                  {/* Preview gambar lama */}
                   {formData.file_gambar && !newImage && (
                     <div className="mb-2">
                       <img
@@ -1746,7 +1677,6 @@ const DataKKPage = () => {
                     </div>
                   )}
 
-                  {/* Preview gambar baru jika dipilih */}
                   {newImage && (
                     <div className="mb-2">
                       <img
@@ -1769,7 +1699,6 @@ const DataKKPage = () => {
                       Ganti Gambar Surat Kontrak maks. 300KB
                     </label>
 
-                    {/* Preview surat kontrak lama (jika ada dan belum pilih baru) */}
                     {formData.file_surat_kontrak && !newContractImage && (
                       <div className="mb-2">
                         <img
@@ -1784,7 +1713,6 @@ const DataKKPage = () => {
                       </div>
                     )}
 
-                    {/* Preview surat kontrak baru jika dipilih */}
                     {newContractImage && (
                       <div className="mb-2">
                         <img
@@ -1854,6 +1782,14 @@ const DataKKPage = () => {
                     Nomor KK
                   </label>
                   <p className="text-gray-900">{selectedKK.nomor_kk}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    No. WhatsApp / HP
+                  </label>
+                  <p className="text-gray-900 font-medium text-green-600">
+                    {selectedKK.no_hp || "-"}
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1993,7 +1929,7 @@ const DataKKPage = () => {
                     </label>
                     <img
                       src={selectedKK.file_surat_kontrak}
-                      alt="Gambar KK"
+                      alt="Gambar Surat Kontrak"
                       className="mt-2 max-h-64 rounded border"
                     />
                   </div>

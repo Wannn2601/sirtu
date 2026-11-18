@@ -22,7 +22,6 @@ const IURKuPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [selectedPayments, setSelectedPayments] = useState(new Set());
-  const [contextMenu, setContextMenu] = useState(null);
   const [wargaData, setWargaData] = useState([]);
   const [iurPaymentsData, setIurPaymentsData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,6 +30,8 @@ const IURKuPage = () => {
   const [rewardData, setRewardData] = useState([]);
   const [keringananData, setKeringananData] = useState([]);
   const { lockStatus } = useBendaharaLock();
+
+  const FONNTE_TOKEN = "VjmncfdGbtxg9J3NhNyt";
 
   const months = [
     "januari",
@@ -62,11 +63,21 @@ const IURKuPage = () => {
     "Des",
   ];
 
-  // useEffect(() => {
-  //   loadAllData();
-  // }, []);
+  const shortMonthNames = {
+    januari: "jan",
+    februari: "feb",
+    maret: "mar",
+    april: "apr",
+    mei: "mei",
+    juni: "jun",
+    juli: "jul",
+    agustus: "agt",
+    september: "sep",
+    oktober: "okt",
+    november: "nov",
+    desember: "des",
+  };
 
-  // Load KK Data
   const loadAllData = async () => {
     try {
       setLoading(true);
@@ -79,13 +90,10 @@ const IURKuPage = () => {
           firestoreService.getAll("iurRates"),
         ]);
 
-      // jika belum ada data iurPayments sama sekali → buat baru dari KK
       if (!iurPayments || iurPayments.length === 0) {
-        console.log("[v0] No iurPayments found, creating default records...");
         await createIurRecordsFromCitizens(kkData);
       }
 
-      setWargaData(kkData || []);
       setWargaData(
         (kkData || []).map((w) => ({
           ...w,
@@ -105,61 +113,6 @@ const IURKuPage = () => {
     }
   };
 
-  const syncIuranNominal = async () => {
-    const rates = await firestoreService.getAll("iurRates");
-    const payments = await firestoreService.getAll("iurPayments");
-
-    for (const p of payments) {
-      const updatedPayments = { ...p.payments };
-      for (const [month, data] of Object.entries(updatedPayments)) {
-        const monthIndex = months.indexOf(month.toLowerCase()) + 1;
-        const monthKey = `${String(monthIndex).padStart(2, "0")}-${
-          p.tahun || 2025
-        }`;
-
-        const rate = rates.find((r) => r.bulan_berlaku === monthKey);
-        if (rate) {
-          updatedPayments[month].amount = Number(rate.besaran_iuran);
-        }
-      }
-      await firestoreService.update("iurPayments", p.id, {
-        payments: updatedPayments,
-      });
-    }
-
-    console.log("✅ Sinkronisasi nominal iuran selesai");
-  };
-
-  // Hitung bulan reward berdasarkan bebasBulan
-  const getRewardMonthsFromConfig = (rewardConfig) => {
-    if (!rewardConfig) return [];
-
-    const { start, end, bebasBulan } = rewardConfig;
-    if (!start || !end || !bebasBulan) return [];
-
-    const [em, ey] = end.split(":").map(Number);
-
-    let y = ey;
-    let m = em;
-
-    const list = [];
-
-    // Ambil sebanyak bebasBulan dari bulan END
-    for (let i = 0; i < bebasBulan; i++) {
-      const key = `${String(m).padStart(2, "0")}-${y}`;
-      list.push(key);
-
-      m--;
-      if (m === 0) {
-        m = 12;
-        y--;
-      }
-    }
-
-    return list; // contoh hasil: ["06-2026"] atau ["06-2026","05-2026"]
-  };
-
-  // Ambil nominal iuran dari iurRates sesuai bulan & tahun
   const getNominalForMonth = (
     wargaId,
     month,
@@ -167,20 +120,17 @@ const IURKuPage = () => {
     pembukuan = "RT",
     mode = "display"
   ) => {
-    const monthIndex = months.indexOf(month.toLowerCase()) + 1;
+    const monthLower = month.toLowerCase();
+    const monthIndex = months.indexOf(monthLower) + 1;
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
 
-    const isFutureYear = year > currentYear;
-    const isCurrentMonthYear =
-      currentYear === year && currentMonth === monthIndex;
     const isAfter0001 =
       currentHour > 0 || (currentHour === 0 && currentMinute >= 1);
 
-    // 1. Hitung latest rate dari iurRates
     const monthKey = `${String(monthIndex).padStart(2, "0")}-${year}`;
     const monthKeyComparable = toComparable(monthKey);
 
@@ -195,21 +145,17 @@ const IURKuPage = () => {
     const latestRate = applicableRates[0];
     const baseAmount = latestRate ? Number(latestRate.besaran_iuran) : 0;
 
-    // Ambil data pembayaran sesuai tahun
     const currentWarga = wargaData.find((w) => w.id === wargaId);
     const paymentsByYear = currentWarga
       ? currentWarga[`payments_${year}`] || {}
       : {};
-    const existing = paymentsByYear[month] || {};
+    const existing = paymentsByYear[monthLower] || paymentsByYear[month] || {};
 
-    // 2. Jika mode = display → tampilkan Rp 0 sebelum bulan berjalan
-    // --- PEMBATAS BULAN BERJALAN ---
-    // Jika bulan tersebut BELUM MASUK bulan berjalan → tampilkan Rp 0
     if (mode === "display" && existing.status !== "lunas") {
       const isFutureMonth =
         year > currentYear ||
         (year === currentYear && monthIndex > currentMonth) ||
-        (year === currentYear && monthIndex === currentMonth && !isAfter0001); // sebelum 00.01
+        (year === currentYear && monthIndex === currentMonth && !isAfter0001);
 
       if (isFutureMonth) {
         return {
@@ -221,30 +167,20 @@ const IURKuPage = () => {
       }
     }
 
-    // 4. Apply reward/keringanan jika ada
-    // 4. Apply reward/keringanan jika ada
-    const reward = rewardData.find((r) => {
-      if ((r.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase())
-        return false;
+    let adjustedAmount = baseAmount;
+    let status = "Belum Bayar";
+    let type = "normal";
+    let isRewardFlag = existing.isReward || false;
 
-      const warga = wargaData.find((w) => w.id === wargaId);
-      if (!warga) return false;
-
-      // wilayah filter aman
-      if (r.wilayah?.rw && r.wilayah.rw !== warga.rw) return false;
-      if (r.wilayah?.rt && r.wilayah.rt !== warga.rt) return false;
-
-      const rStart = r.start.replace(":", "-");
-      const rEnd = r.end.replace(":", "-");
-
-      return rStart <= monthKey && monthKey <= rEnd;
-    });
+    if (existing.isReward) {
+      adjustedAmount = 0;
+      status = "Lunas (Reward)";
+      type = "reward";
+    }
 
     const keringanan = keringananData.find((k) => {
       if ((k.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase())
         return false;
-
-      // Cek apakah keringanan ditujukan untuk warga ini
       const warga = wargaData.find((w) => w.id === wargaId);
       const namaKK = warga?.nama_kepala_keluarga || warga?.nama;
 
@@ -257,23 +193,14 @@ const IURKuPage = () => {
 
       const kStart = k.start.replace(":", "-");
       const kEnd = k.end.replace(":", "-");
-
-      // Only apply keringanan if it's within the selected year
-      // Extract year from kStart and kEnd (format MM-YYYY)
       const kStartYear = Number.parseInt(kStart.split("-")[1]);
       const kEndYear = Number.parseInt(kEnd.split("-")[1]);
 
-      // If keringanan year range doesn't include selected year, skip it
       if (year < kStartYear || year > kEndYear) return false;
-
       return kStart <= monthKey && monthKey <= kEnd;
     });
-    // 3. Jika mode = payment → SELALU gunakan baseAmount meskipun bulan belum masuk
-    let adjustedAmount = baseAmount;
-    let status = "Belum Bayar";
-    let type = "normal";
 
-    if (keringanan) {
+    if (keringanan && !isRewardFlag) {
       if (keringanan.jenis === "PEMBEBASAN") {
         adjustedAmount = 0;
         status = "Lunas (Pembebasan)";
@@ -304,145 +231,169 @@ const IURKuPage = () => {
       originalAmount: baseAmount,
       status,
       type,
-
-      // Tambahkan flag otomatis agar warna tampil
-      isReward: type === "reward",
+      isReward: isRewardFlag,
       isPembebasan: type === "pembebasan",
       isPenghapusan: type === "penghapusan",
       isKeringanan: type === "keringanan",
     };
   };
 
-  // Tentukan bulan paling akhir sebagai bulan reward
-  // Return 1 or 2 reward months based on selected count
-  const getRewardMonths = (paymentArray) => {
-    const monthIndices = paymentArray
-      .map((key) => {
-        const parts = key.split("-");
-        const month = parts[parts.length - 2];
-        return months.indexOf(month.toLowerCase());
-      })
-      .sort((a, b) => a - b);
+  const recalculateAndSaveWargaYear = async (wargaId, year, pembukuanType, specificCancelledMonth = null) => {
+    const warga = wargaData.find((w) => w.id === wargaId);
+    if (!warga) return;
 
-    const rewardCount = monthIndices.length === 12 ? 2 : 1;
+    const paymentsByYear = warga[`payments_${year}`] || {};
+    const activeReward = rewardData.find(
+      (r) => (r.pembukuan || "RT").toUpperCase() === pembukuanType.toUpperCase()
+    );
 
-    // Ambil bulan paling akhir sesuai jumlah reward
-    return monthIndices.slice(-rewardCount).map((i) => months[i]); // kembalikan nama bulan
-  };
-
-  const getKeringananAdjustmentForWarga = (wargaId, month, year, pembukuan) => {
-    const monthIndex = months.indexOf(month.toLowerCase()) + 1;
-    const monthKey = `${year}-${String(monthIndex).padStart(2, "0")}`;
-
-    const keringanan = keringananData.find((k) => {
-      if ((k.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase())
-        return false;
-      // Match by kepalaWarga name or wargaId if available
-      if (k.kepalaWarga) {
-        const wargaName = wargaData.find(
-          (w) => w.id === wargaId
-        )?.nama_kepala_keluarga;
-        if (wargaName && k.kepalaWarga !== wargaName) return false;
+    const updatedPaymentsYear = {};
+    months.forEach((m) => {
+      const existingM = paymentsByYear[m] || { status: "belum_bayar", amount: 0 };
+      
+      if (m === specificCancelledMonth) {
+        updatedPaymentsYear[m] = {
+          amount: 0,
+          status: "belum_bayar",
+          tanggal_bayar: null,
+          isReward: false,
+          isPembebasan: false,
+          isPenghapusan: false,
+          isKeringanan: false,
+        };
+      } else {
+        updatedPaymentsYear[m] = { ...existingM, isReward: false };
+        if (updatedPaymentsYear[m].status === "lunas" && (updatedPaymentsYear[m].amount === 0 || updatedPaymentsYear[m].amount === undefined)) {
+          const nominal = getNominalForMonth(wargaId, m, year, pembukuanType, "payment");
+          updatedPaymentsYear[m].amount = nominal.amount;
+        }
       }
-      const kStart = fromKey(k.start);
-      const kEnd = fromKey(k.end);
-      return kStart && kEnd && kStart <= monthKey && monthKey <= kEnd;
     });
-    return keringanan || null;
-  };
 
-  // Load Tarif Iuran
-  const loadIurRates = async () => {
-    try {
-      const data = await firestoreService.getAll("iurRates");
-      setIurRates(data || []);
-    } catch (error) {
-      console.error("Error loading iurRates:", error);
+    if (activeReward) {
+      const frequency = Number(activeReward.frequency || 6);
+      const bebasBulan = Number(activeReward.bebasBulan || 1);
+
+      let validPaidMonths = [];
+      months.forEach((m) => {
+        const p = updatedPaymentsYear[m];
+        if (p && p.status === "lunas" && !p.isReward && m !== specificCancelledMonth) {
+          validPaidMonths.push(m);
+        }
+      });
+
+      validPaidMonths.sort((a, b) => months.indexOf(a) - months.indexOf(b));
+
+      if (validPaidMonths.length >= frequency) {
+        const multiplier = Math.floor(validPaidMonths.length / frequency);
+        
+        for (let i = 0; i < multiplier; i++) {
+          const chunk = validPaidMonths.slice(i * frequency, (i + 1) * frequency);
+          if (chunk.length === frequency) {
+            const lastMonthOfChunk = chunk[chunk.length - 1];
+            const lastIndex = months.indexOf(lastMonthOfChunk);
+            
+            for (let b = 1; b <= bebasBulan; b++) {
+              const freeIndex = lastIndex + b;
+              if (freeIndex < months.length) {
+                const freeMonthName = months[freeIndex];
+                if (freeMonthName !== specificCancelledMonth && updatedPaymentsYear[freeMonthName] && updatedPaymentsYear[freeMonthName].status === "lunas") {
+                  updatedPaymentsYear[freeMonthName].isReward = true;
+                  updatedPaymentsYear[freeMonthName].amount = 0;
+                }
+              }
+            }
+          }
+        }
+      }
     }
-  };
 
-  useEffect(() => {
-    loadAllData();
-  }, []);
-
-  const loadIurPaymentsData = async () => {
-    try {
-      const data = await firestoreService.getAll("iurPayments");
-      console.log("[v0] Loaded IUR payments data:", data);
-      setIurPaymentsData(data || []);
-    } catch (error) {
-      console.error("[v0] Error loading IUR payments:", error);
-    }
-  };
-
-  // Helper untuk format alamat agar tidak keluar "undefined"
-  const formatAlamat = (data) => {
-    const alamat = data.alamat || "";
-    const noRumah = data.no_rumah ? `No. ${data.no_rumah}` : "";
-
-    if (!alamat && !noRumah) return "-";
-    return [alamat, noRumah].filter(Boolean).join(" | ");
-  };
-
-  const loadRewardData = async () => {
-    try {
-      const data = await firestoreService.getAll("rewardSadarIW");
-      setRewardData(data || []);
-    } catch (error) {
-      console.error("[v0] Error loading reward data:", error);
-    }
-  };
-
-  const loadKeringananData = async () => {
-    try {
-      const data = await firestoreService.getAll("keringananIUR");
-      setKeringananData(data || []);
-    } catch (error) {
-      console.error("[v0] Error loading keringanan data:", error);
-    }
-  };
-
-  const isMonthInReward = (month, year, pembukuan) => {
-    const monthKey = `${year}-${
-      months.indexOf(month.toLowerCase()) + 1
-    }`.replace(/(\d+)$/, (m) => String(m).padStart(2, "0"));
-    return rewardData.some((r) => {
-      if ((r.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase())
-        return false;
-      const rStart = fromKey(r.start);
-      const rEnd = fromKey(r.end);
-      return rStart && rEnd && rStart <= monthKey && monthKey <= rEnd;
+    await firestoreService.update("kkData", wargaId, {
+      [`payments_${year}`]: updatedPaymentsYear,
+      updatedAt: new Date(),
     });
   };
 
-  const getKeringananAdjustment = (month, year, pembukuan) => {
-    const monthKey = `${year}-${
-      months.indexOf(month.toLowerCase()) + 1
-    }`.replace(/(\d+)$/, (m) => String(m).padStart(2, "0"));
-    const keringanan = keringananData.find((k) => {
-      if ((k.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase())
-        return false;
-      const kStart = fromKey(k.start);
-      const kEnd = fromKey(k.end);
-      return kStart && kEnd && kStart <= monthKey && monthKey <= kEnd;
+  const calculateRewardMonthsFromBatch = (paymentArray, pembukuan = "RT") => {
+    const activeReward = rewardData.find(
+      (r) => (r.pembukuan || "RT").toUpperCase() === pembukuan.toUpperCase()
+    );
+
+    if (!activeReward) return [];
+
+    const frequency = Number(activeReward.frequency || 6);
+    const bebasBulan = Number(activeReward.bebasBulan || 1);
+
+    const wargaPaymentMap = {};
+    paymentArray.forEach((paymentKey) => {
+      const lastHyphenIndex = paymentKey.lastIndexOf("-");
+      const year = paymentKey.substring(lastHyphenIndex + 1);
+      const secondLastHyphenIndex = paymentKey.lastIndexOf("-", lastHyphenIndex - 1);
+      const month = paymentKey.substring(secondLastHyphenIndex + 1, lastHyphenIndex);
+      const rowId = paymentKey.substring(0, secondLastHyphenIndex);
+
+      if (!wargaPaymentMap[rowId]) {
+        wargaPaymentMap[rowId] = [];
+      }
+      wargaPaymentMap[rowId].push({ month: month.toLowerCase(), year, paymentKey });
     });
-    return keringanan || null;
+
+    const rewardKeysToApply = [];
+
+    Object.keys(wargaPaymentMap).forEach((rowId) => {
+      const payments = wargaPaymentMap[rowId];
+      const warga = wargaData.find((w) => w.id === rowId);
+      const paymentsByYear = warga ? warga[`payments_${selectedYear}`] || {} : {};
+
+      const allPaidMonths = [];
+      months.forEach((m) => {
+        const isCurrentBatch = payments.some((p) => p.month === m);
+        const isAlreadyPaid = paymentsByYear[m]?.status === "lunas" && !paymentsByYear[m]?.isReward;
+        if (isCurrentBatch || isAlreadyPaid) {
+          allPaidMonths.push(m);
+        }
+      });
+
+      allPaidMonths.sort((a, b) => months.indexOf(a) - months.indexOf(b));
+
+      if (allPaidMonths.length >= frequency) {
+        const multiplier = Math.floor(allPaidMonths.length / frequency);
+        for (let i = 0; i < multiplier; i++) {
+          const chunk = allPaidMonths.slice(i * frequency, (i + 1) * frequency);
+          if (chunk.length === frequency) {
+            const lastMonthOfChunk = chunk[chunk.length - 1];
+            const lastIndex = months.indexOf(lastMonthOfChunk);
+
+            for (let b = 1; b <= bebasBulan; b++) {
+              const freeIndex = lastIndex + b;
+              if (freeIndex < months.length) {
+                const freeMonthName = months[freeIndex];
+                const matchInBatch = payments.find((p) => p.month === freeMonthName);
+                if (matchInBatch) {
+                  rewardKeysToApply.push(matchInBatch.paymentKey);
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return rewardKeysToApply;
   };
 
   const createIurRecordsFromCitizens = async (citizenData) => {
     try {
       const existingIurData = await firestoreService.getAll("iurPayments");
       const existingIds = new Set(existingIurData.map((item) => item.warga_id));
-
       const newIurRecords = [];
 
       for (const citizen of citizenData) {
         if (!existingIds.has(citizen.id_warga)) {
-          // Create payment structure for all months
           const payments = {};
           months.forEach((month) => {
             payments[month] = {
-              amount: 0, // Default IUR amount
+              amount: 0,
               status: "belum_bayar",
               tanggal_bayar: null,
             };
@@ -462,16 +413,12 @@ const IURKuPage = () => {
         }
       }
 
-      // Save new IUR records to Firestore
       for (const record of newIurRecords) {
         await firestoreService.add("iurPayments", record);
       }
 
       if (newIurRecords.length > 0) {
-        console.log(
-          `[v0] Created ${newIurRecords.length} new IUR payment records`
-        );
-        await loadIurPaymentsData(); // Reload IUR payments data
+        await loadAllData();
       }
     } catch (error) {
       console.error("[v0] Error creating IUR records from citizens:", error);
@@ -484,50 +431,32 @@ const IURKuPage = () => {
       if (!row) return;
 
       const tahun = selectedYear;
+      const monthLower = month.toLowerCase();
       const nominal = getNominalForMonth(
         rowId,
-        month,
+        monthLower,
         tahun,
         row.pembukuan || "RT",
         "payment"
       );
 
-      // Also use actual amount from paymentData, not nominal.amount which is 0 for future months
       const updateData = {
-        [`payments_${tahun}.${month}.amount`]:
-          paymentData.amount || nominal.amount,
-        [`payments_${tahun}.${month}.status`]: paymentData.status,
-        [`payments_${tahun}.${month}.tanggal_bayar`]: paymentData.tanggal_bayar,
-        [`payments_${tahun}.${month}.isReward`]: paymentData.isReward || false,
-        [`payments_${tahun}.${month}.isPembebasan`]:
+        [`payments_${tahun}.${monthLower}.amount`]:
+          paymentData.amount !== undefined ? paymentData.amount : nominal.amount,
+        [`payments_${tahun}.${monthLower}.status`]: paymentData.status,
+        [`payments_${tahun}.${monthLower}.tanggal_bayar`]: paymentData.tanggal_bayar,
+        [`payments_${tahun}.${monthLower}.isReward`]: paymentData.isReward || false,
+        [`payments_${tahun}.${monthLower}.isPembebasan`]:
           paymentData.isPembebasan || false,
-        [`payments_${tahun}.${month}.isPenghapusan`]:
+        [`payments_${tahun}.${monthLower}.isPenghapusan`]:
           paymentData.isPenghapusan || false,
-        [`payments_${tahun}.${month}.isKeringanan`]:
+        [`payments_${tahun}.${monthLower}.isKeringanan`]:
           paymentData.isKeringanan || false,
-
         updatedAt: new Date(),
       };
 
       await firestoreService.update("kkData", rowId, updateData);
       await loadAllData();
-
-      setWargaData((prev) =>
-        prev.map((item) =>
-          item.id === rowId
-            ? {
-                ...item,
-                payments: {
-                  ...item.payments,
-                  [month]: {
-                    amount: paymentData.amount || nominal.amount,
-                    ...paymentData,
-                  },
-                },
-              }
-            : item
-        )
-      );
     } catch (error) {
       console.error("Error updating payment:", error);
       Swal.fire("Error", "Gagal update pembayaran", "error");
@@ -540,7 +469,6 @@ const IURKuPage = () => {
     return wargaData
       .map((warga) => {
         const pembukuan = warga.pembukuan || "RT";
-        const defaultPayments = {};
         const mergedPayments = {};
 
         months.forEach((month) => {
@@ -562,12 +490,8 @@ const IURKuPage = () => {
               existing.status === "lunas"
                 ? existing.amount ?? adjusted.amount
                 : adjusted.amount,
-
             status: existing.status || adjusted.status,
-
             tanggal_bayar: existing.tanggal_bayar || null,
-
-            // FLAG PRIORITAS dari aturan keringanan
             isReward: adjusted.isReward || existing.isReward || false,
             isPembebasan:
               adjusted.isPembebasan || existing.isPembebasan || false,
@@ -575,7 +499,6 @@ const IURKuPage = () => {
               adjusted.isPenghapusan || existing.isPenghapusan || false,
             isKeringanan:
               adjusted.isKeringanan || existing.isKeringanan || false,
-
             originalAmount: adjusted.originalAmount,
           };
         });
@@ -583,38 +506,29 @@ const IURKuPage = () => {
         return {
           id: warga.id,
           nama_kk: warga.nama_kepala_keluarga || warga.nama,
-          alamat: formatAlamat(warga),
+          alamat: warga.alamat || warga.alamat_tinggal || "-",
           tahun: selectedYear,
           pembukuan: pembukuan,
-          payments: mergedPayments, // ← PENTING!
+          payments: mergedPayments,
         };
       })
       .filter(
         (item) =>
-          item.tahun === selectedYear && // Filter by selected year only
+          item.tahun === selectedYear &&
           (item.nama_kk?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             item.alamat?.toLowerCase().includes(searchTerm.toLowerCase()))
       )
-      .sort((a, b) => a.nama_kk?.localeCompare(b.nama_kk)); // Sort A-Z by nama_kk
-  }, [
-    wargaData,
-    iurRates,
-    selectedYear,
-    searchTerm,
-    rewardData,
-    keringananData,
-  ]);
-
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, []);
+      .sort((a, b) => a.nama_kk?.localeCompare(b.nama_kk));
+  }, [wargaData, iurRates, selectedYear, searchTerm, rewardData, keringananData]);
 
   const totalPages = Math.ceil(filteredData.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedData = filteredData.slice(
-    startIndex,
-    startIndex + itemsPerPage
-  );
+  const paginatedData = filteredData.slice(startIndex, startIndex + itemsPerPage);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    loadAllData();
+  }, []);
 
   const handleCheckboxChange = (rowId, month, isChecked) => {
     const paymentKey = `${rowId}-${month}-${selectedYear}`;
@@ -625,18 +539,18 @@ const IURKuPage = () => {
     } else {
       newSelected.delete(paymentKey);
     }
-
     setSelectedPayments(newSelected);
   };
 
   const handleRightClick = (e, userId, month, payment) => {
-    e.preventDefault(); // penting! cegah menu klik kanan default
-
+    e.preventDefault();
     if (!payment || payment.status !== "lunas") return;
+
+    const monthLower = month.toLowerCase();
 
     Swal.fire({
       title: "Batalkan pembayaran?",
-      text: `Kamu yakin ingin membatalkan pembayaran bulan ${month}?`,
+      text: `Kamu yakin ingin membatalkan pembayaran bulan ${month}? Status reward dan data di laporan keuangan akan disesuaikan.`,
       icon: "warning",
       showCancelButton: true,
       confirmButtonText: "Ya, batalkan",
@@ -644,23 +558,31 @@ const IURKuPage = () => {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          // Update data Firestore (sesuaikan nama collection dan struktur dokumenmu)
-          await firestoreService.update("kkData", userId, {
-            [`payments_${selectedYear}.${month}.amount`]: 0,
-            [`payments_${selectedYear}.${month}.status`]: "belum_bayar",
-            [`payments_${selectedYear}.${month}.tanggal_bayar`]: null,
-            [`payments_${selectedYear}.${month}.isReward`]: false,
-            [`payments_${selectedYear}.${month}.isPembebasan`]: false,
-            [`payments_${selectedYear}.${month}.isPenghapusan`]: false,
-            [`payments_${selectedYear}.${month}.isKeringanan`]: false,
-            [`payments_${selectedYear}.${month}.cancelled_by`]:
-              user?.nama || "Admin",
-            [`payments_${selectedYear}.${month}.cancelled_at`]:
-              new Date().toISOString(),
-          });
-          await removeRewardIfInvalid(userId, selectedYear);
+          const row = wargaData.find((w) => w.id === userId);
+          const namaWarga = row ? (row.nama_kepala_keluarga || row.nama) : "Warga";
+          const pembukuanType = row?.pembukuan || "RT";
+          
+          const shortM = shortMonthNames[monthLower] || month;
+          const shortY = String(selectedYear).slice(-2);
+          const targetStr = `${shortM}'${shortY}`;
 
-          Swal.fire("Berhasil!", "Pembayaran telah dibatalkan.", "success");
+          // Jalankan reset total pada bulan bersangkutan & kalkulasi ulang reward
+          await recalculateAndSaveWargaYear(userId, selectedYear, pembukuanType, monthLower);
+
+          // Hapus pencatatan di laporan keuangan berdasarkan nama warga dan bulan terkait secara akurat
+          const allLaporan = await firestoreService.getAll("laporanKeuangan");
+          const matchedLaporanList = allLaporan.filter(
+            (l) =>
+              l.detail &&
+              l.detail.toLowerCase().includes(namaWarga.toLowerCase()) &&
+              l.detail.toLowerCase().includes(targetStr.toLowerCase())
+          );
+
+          for (const lap of matchedLaporanList) {
+            await firestoreService.delete("laporanKeuangan", lap.id);
+          }
+
+          Swal.fire("Berhasil!", "Pembayaran telah dibatalkan, reward dikalkulasi ulang, dan laporan diperbarui.", "success");
           await loadAllData();
         } catch (error) {
           console.error("Error batal bayar:", error);
@@ -670,360 +592,340 @@ const IURKuPage = () => {
     });
   };
 
-  const closeContextMenu = () => {
-    setContextMenu(null);
-  };
+  // Fungsi Kirim Pesan WhatsApp via Fonnte API
+  const sendWhatsAppNotification = async (targetPhone, messageContent) => {
+  if (!targetPhone) {
+    console.warn("Nomor WhatsApp warga tidak ditemukan.");
+    return false;
+  }
 
-  const calculateRewardDiscount = (selectedMonths) => {
-    // Count consecutive months selected
-    const monthIndices = selectedMonths
-      .map((key) => {
-        const parts = key.split("-");
-        const month = parts[parts.length - 2];
-        return months.indexOf(month.toLowerCase());
-      })
-      .sort((a, b) => a - b);
+  // Bersihkan nomor dari spasi, tanda -, atau karakter non-digit
+  let formattedPhone = targetPhone.toString().replace(/\D/g, "");
 
-    // Check if 6 or 12 consecutive months are selected
-    let rewardMonths = 0;
-    if (monthIndices.length === 6) {
-      rewardMonths = 1; // 1 month free for 6 months payment
-    } else if (monthIndices.length === 12) {
-      rewardMonths = 2; // 2 months free for 12 months payment
+  // Format nomor Indonesia (ubah 08... menjadi 628...)
+  if (formattedPhone.startsWith("0")) {
+    formattedPhone = "62" + formattedPhone.slice(1);
+  }
+
+  try {
+    const response = await fetch("https://api.fonnte.com/send", {
+      method: "POST",
+      headers: {
+        Authorization: FONNTE_TOKEN,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        target: formattedPhone,
+        message: messageContent,
+        // countryCode: "62" // Opsional: memastikan kode negara jika diperlukan
+      }),
+    });
+
+    const resData = await response.json();
+    
+    if (resData.status) {
+      console.log("✅ Pesan WhatsApp berhasil dikirim via Fonnte ke:", formattedPhone);
+      return true;
+    } else {
+      console.error("❌ Gagal mengirim WhatsApp oleh Fonnte:", resData.reason || resData.message);
+      return false;
     }
+  } catch (err) {
+    console.error("❌ Error koneksi ke Fonnte API:", err);
+    return false;
+  }
+};
 
-    return rewardMonths;
+  const recordToLaporanKeuangan = async (paymentArray, pembukuanType) => {
+    try {
+      const currentDate = new Date().toISOString().split("T")[0];
+      const nowTimestamp = new Date();
+      const wargaMap = {};
+
+      paymentArray.forEach((paymentKey) => {
+        const lastHyphenIndex = paymentKey.lastIndexOf("-");
+        const year = paymentKey.substring(lastHyphenIndex + 1);
+        const secondLastHyphenIndex = paymentKey.lastIndexOf("-", lastHyphenIndex - 1);
+        const month = paymentKey.substring(secondLastHyphenIndex + 1, lastHyphenIndex);
+        const rowId = paymentKey.substring(0, secondLastHyphenIndex);
+
+        if (!wargaMap[rowId]) {
+          wargaMap[rowId] = { items: [], year };
+        }
+        wargaMap[rowId].items.push({ month: month.toLowerCase(), year });
+      });
+
+      for (const [rowId, data] of Object.entries(wargaMap)) {
+        const row = wargaData.find((w) => w.id === rowId);
+        const namaWarga = row ? (row.nama_kepala_keluarga || row.nama) : "Warga";
+        const idKkVal = row?.id_kk || row?.id || "KK";
+        const items = data.items;
+
+        let totalPenerimaanForWarga = 0;
+        items.forEach((item) => {
+          const nominal = getNominalForMonth(rowId, item.month, Number(item.year), pembukuanType, "payment");
+          totalPenerimaanForWarga += nominal.amount;
+        });
+
+        if (totalPenerimaanForWarga <= 0) continue;
+
+        // 1 & 2. Generate no_arsip dengan mengambil bulan saat pembuatan (bulan berjalan saat ini)
+        const random6Digits = Math.floor(100000 + Math.random() * 900000);
+        const currentActiveMonthNumber = new Date().getMonth() + 1; // Bulan berjalan saat ini (1-12)
+        const formattedCurrentMonthCode = String(currentActiveMonthNumber).padStart(2, "0");
+        const generatedNoArsip = `${idKkVal}.${random6Digits}.${formattedCurrentMonthCode}`;
+
+        const formattedMonthsList = items.map((item) => {
+          const sm = shortMonthNames[item.month] || item.month;
+          const sy = String(item.year).slice(-2);
+          return `${sm}'${sy}`;
+        }).join(", ");
+
+        const detailText = `IPL bulan: ${formattedMonthsList} (${namaWarga})`;
+
+        const laporanPayload = {
+          createdAt: nowTimestamp,
+          detail: detailText,
+          dibuat_oleh: user?.nama || "Super Administrator",
+          id_sub_rekening_kegiatan: "1.2",
+          jenis_pembukuan: "Penerimaan",
+          kategori: "kas_rt",
+          no_arsip: generatedNoArsip,
+          pembukuan: pembukuanType,
+          penerimaan: totalPenerimaanForWarga,
+          pengeluaran: 0,
+          saldo_bulan_ini: 0,
+          saldo_bulan_lalu: 0,
+          tanggal: currentDate,
+          updatedAt: nowTimestamp,
+          uraian: "",
+        };
+
+        await firestoreService.add("laporanKeuangan", laporanPayload);
+
+        // 3 & 4. Kirim Pesan WhatsApp ke Nomor Warga menggunakan Fonnte
+        const rtVal = row?.rt || "-";
+        const rwVal = row?.rw || "-";
+        const kelurahanVal = row?.kelurahan || "-";
+        const targetNumber = row?.no_hp || row?.whatsapp || row?.telepon || row?.no_telepon;
+
+        const waMessage = `Terima kasih telah melaksanakan kewajiban Pembayaran IPL Warga RT ${rtVal} RW ${rwVal} kelurahan ${kelurahanVal}, bulan ${formattedMonthsList}. No Bukti Bayar: ${generatedNoArsip} Total Bayar: Rp. ${totalPenerimaanForWarga.toLocaleString("id-ID")}. Hormat kami, Ketua RT.`;
+
+        if (targetNumber) {
+          await sendWhatsAppNotification(targetNumber, waMessage);
+        }
+      }
+      console.log("✅ Berhasil mencatat laporan keuangan dan mengirim WA");
+    } catch (err) {
+      console.error("Gagal mencatat laporan keuangan / kirim WA:", err);
+    }
   };
 
   const handleBatchPayment = async () => {
     if (selectedPayments.size === 0) return;
 
-    const result = await Swal.fire({
-      title: "Konfirmasi Pembayaran",
-      text: `Apakah Anda yakin ingin memproses ${selectedPayments.size} pembayaran yang dipilih?`,
-      icon: "question",
-      showCancelButton: true,
-      confirmButtonColor: "#10b981",
-      cancelButtonColor: "#6b7280",
-      confirmButtonText: "Ya, Bayar",
-      cancelButtonText: "Batal",
-      customClass: {
-        popup: "max-h-screen overflow-y-auto",
-      },
-    });
-    // === HITUNG REWARD BERDASARKAN KONFIG FIREBASE ===
-    const rewardConfig = rewardData.find(
-      (r) => (r.pembukuan || "RT").toUpperCase() === "RT"
-    );
+    const paymentArray = Array.from(selectedPayments);
+    const sampleKey = paymentArray[0];
+    const sampleRowId = sampleKey.substring(0, sampleKey.lastIndexOf("-", sampleKey.lastIndexOf("-") - 1));
+    const sampleRow = filteredData.find((item) => item.id === sampleRowId);
+    const pembukuanType = sampleRow?.pembukuan || "RT";
 
-    let rewardMonths = [];
+    const rewardKeysSet = new Set(calculateRewardMonthsFromBatch(paymentArray, pembukuanType));
 
-    if (rewardConfig) {
-      const listReward = getRewardMonthsFromConfig(rewardConfig);
-      const selectedCount = selectedPayments.size;
+    const wargaMapSummary = {};
+    paymentArray.forEach((paymentKey) => {
+      const lastHyphenIndex = paymentKey.lastIndexOf("-");
+      const year = paymentKey.substring(lastHyphenIndex + 1);
+      const secondLastHyphenIndex = paymentKey.lastIndexOf("-", lastHyphenIndex - 1);
+      const month = paymentKey.substring(secondLastHyphenIndex + 1, lastHyphenIndex);
+      const rowId = paymentKey.substring(0, secondLastHyphenIndex);
 
-      // Jika bayar minimal sesuai frequency
-      if (selectedCount >= rewardConfig.frequency) {
-        rewardMonths = listReward.slice(0, rewardConfig.bebasBulan);
+      if (!wargaMapSummary[rowId]) {
+        wargaMapSummary[rowId] = { monthsList: [] };
       }
+      const sm = shortMonthNames[month.toLowerCase()] || month;
+      const sy = String(year).slice(-2);
+      wargaMapSummary[rowId].monthsList.push(`${sm}'${sy}`);
+    });
+
+    const firstRowId = Object.keys(wargaMapSummary)[0];
+    const rowDetailWarga = wargaData.find((w) => w.id === firstRowId);
+    const namaKKPopup = rowDetailWarga ? (rowDetailWarga.nama_kepala_keluarga || rowDetailWarga.nama) : "Warga";
+    
+    let allMonthsStr = "";
+    if (firstRowId && wargaMapSummary[firstRowId]) {
+      allMonthsStr = wargaMapSummary[firstRowId].monthsList.join(", ");
+    }
+    if (Object.keys(wargaMapSummary).length > 1) {
+      allMonthsStr += ` (+ Warga lainnya)`;
     }
 
-    console.log("Reward months:", rewardMonths);
+    let previewTotal = 0;
+    paymentArray.forEach((pk) => {
+      const parts = pk.split("-");
+      const yr = Number.parseInt(parts.pop());
+      const mn = parts.pop();
+      const rId = parts.join("-");
+      if (!rewardKeysSet.has(pk)) {
+        const rItem = filteredData.find(x => x.id === rId);
+        const nom = getNominalForMonth(rId, mn.toLowerCase(), yr, rItem?.pembukuan || "RT", "display");
+        previewTotal += nom.amount || nom.originalAmount;
+      }
+    });
+
+    const currentDateStr = new Date().toLocaleDateString("id-ID", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    });
+
+    const result = await Swal.fire({
+      title: `<div style="font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 2px;">Konfirmasi Pembayaran</div>`,
+      html: `
+        <style>
+          @keyframes pulse-icon {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+            70% { transform: scale(1.08); box-shadow: 0 0 0 12px rgba(16, 185, 129, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+          }
+          .custom-icon-box {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 12px auto;
+            animation: pulse-icon 2s infinite ease-in-out;
+            color: white;
+            font-size: 24px;
+          }
+          .info-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 14px;
+            text-align: left;
+            margin-top: 8px;
+          }
+          .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            font-size: 13px;
+          }
+          .info-row:last-child {
+            margin-bottom: 0;
+          }
+          .info-label {
+            color: #64748b;
+            font-weight: 500;
+          }
+          .info-value {
+            color: #0f172a;
+            font-weight: 600;
+            text-align: right;
+          }
+        </style>
+        <div>
+          <div class="custom-icon-box">💰</div>
+          <p style="font-size: 14px; color: #334155; margin-bottom: 10px; font-weight: 500;">
+            Anda akan mencatat Penerimaan Iuran Warga a.n. <span style="color: #059669; font-weight: 700;">${namaKKPopup}</span>
+          </p>
+          <div class="info-card">
+            <div class="info-row">
+              <span class="info-label">Iuran Bulan</span>
+              <span class="info-value" style="max-width: 180px; word-break: break-word;">${allMonthsStr}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Sejumlah</span>
+              <span class="info-value" style="color: #059669; font-size: 14px;">Rp ${previewTotal.toLocaleString("id-ID")}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Tanggal</span>
+              <span class="info-value">${currentDateStr}</span>
+            </div>
+          </div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonColor: "#10b981",
+      cancelButtonColor: "#64748b",
+      confirmButtonText: "Ya, Proses Pembayaran",
+      cancelButtonText: "Batal",
+      reverseButtons: true,
+    });
 
     if (result.isConfirmed) {
       const currentDate = new Date().toISOString().split("T")[0];
-      const paymentArray = Array.from(selectedPayments);
-
-      const rewardMonths = calculateRewardDiscount(paymentArray);
-      const rewardApplied = false;
-
-      // Tentukan bulan reward jika ada
-      const rewardMonthList =
-        rewardMonths > 0 ? getRewardMonths(paymentArray) : [];
-
       let successCount = 0;
       let errorCount = 0;
 
       try {
         await Promise.all(
-          paymentArray.map(async (paymentKey, i) => {
-            // paymentKey format: {rowId}-{month}-{year}
-            const lastHyphonIndex = paymentKey.lastIndexOf("-");
-            const year = paymentKey.substring(lastHyphonIndex + 1);
+          paymentArray.map(async (paymentKey) => {
+            const lastHyphenIndex = paymentKey.lastIndexOf("-");
+            const year = paymentKey.substring(lastHyphenIndex + 1);
             const secondLastHyphenIndex = paymentKey.lastIndexOf(
               "-",
-              lastHyphonIndex - 1
+              lastHyphenIndex - 1
             );
             const month = paymentKey.substring(
               secondLastHyphenIndex + 1,
-              lastHyphonIndex
+              lastHyphenIndex
             );
             const rowId = paymentKey.substring(0, secondLastHyphenIndex);
-
-            console.log(
-              `[v0] Processing payment ${i + 1}/${paymentArray.length}:`,
-              rowId
-            );
 
             try {
               const wargaRow = wargaData.find((w) => w.id === rowId);
               if (!wargaRow) {
-                console.error(`[v0] Warga not found for rowId: ${rowId}`);
                 errorCount++;
                 return;
               }
 
-              // Ambil data asli untuk tahun terpilih
-              const rowOriginal = wargaData.find((w) => w.id === rowId);
-              const paymentsByYear =
-                rowOriginal[`payments_${selectedYear}`] || {};
+              const nominal = getNominalForMonth(
+                rowId,
+                month.toLowerCase(),
+                selectedYear,
+                wargaRow.pembukuan || "RT",
+                "payment"
+              );
 
-              const bulanData = paymentsByYear[month] || {
-                amount: 0,
-                status: "belum_bayar",
-                tanggal_bayar: null,
-              };
+              const isThisMonthReward = rewardKeysSet.has(paymentKey);
 
-              // TIDAK PERLU VALIDASI, Firestore bisa auto-buat bulan baru
-              if (!bulanData) {
-                console.error(
-                  `[v0] Payment data not found for month: ${month}`
-                );
-                errorCount++;
-                return;
-              }
-
-              // For future months, bulanData.amount contains the revealed besaran
-              const paymentAmount =
-                bulanData.amount || bulanData.originalAmount || 0;
-
-              // Cek apakah bulan ini adalah bulan reward
-              const isRewardThisMonth = rewardMonthList.includes(month);
-
-              await updateIurPayment(rowId, month, {
+              await updateIurPayment(rowId, month.toLowerCase(), {
                 status: "lunas",
                 tanggal_bayar: currentDate,
-                amount: isRewardThisMonth ? 0 : paymentAmount,
-                isReward: isRewardThisMonth,
+                amount: isThisMonthReward ? 0 : nominal.amount,
+                isReward: isThisMonthReward,
               });
 
               successCount++;
-              console.log(`[v0] Successfully updated payment ${i + 1}:`, rowId);
-            } catch (error) {
-              console.error(`[v0] Error processing payment:`, error);
+            } catch (err) {
+              console.error("Error payment item:", err);
               errorCount++;
             }
           })
         );
 
+        await recordToLaporanKeuangan(paymentArray, pembukuanType);
+
         setSelectedPayments(new Set());
-
-        let message = `${successCount} pembayaran berhasil diproses!`;
-        if (rewardMonths > 0) {
-          message += `\n\nReward: ${rewardMonths} bulan gratis!`;
-        }
-
-        if (errorCount === 0) {
-          Swal.fire({
-            icon: "success",
-            title: "Berhasil",
-            text: message,
-            timer: 2000,
-            showConfirmButton: false,
-          });
-        } else {
-          Swal.fire({
-            icon: "warning",
-            title: "Sebagian Berhasil",
-            text: `${successCount} pembayaran berhasil, ${errorCount} gagal diproses.`,
-            confirmButtonText: "OK",
-          });
-        }
-
-        await loadIurPaymentsData();
-      } catch (error) {
-        console.error("[v0] Batch payment error:", error);
-        Swal.fire({
-          icon: "error",
-          title: "Error",
-          text: "Terjadi kesalahan saat memproses batch pembayaran.",
-        });
-      }
-    }
-  };
-
-  const removeRewardIfInvalid = async (rowId, year) => {
-    const warga = wargaData.find((w) => w.id === rowId);
-    if (!warga) return;
-
-    const payments = warga[`payments_${year}`] || {};
-
-    // 1. Kumpulkan hanya bulan yang lunas normal (bukan reward)
-    const normalPaid = months
-      .map((m, i) => {
-        const p = payments[m];
-        if (!p) return -1;
-        if (p.isReward) return -1; // JANGAN hitung reward
-        if (p.status !== "lunas") return -1;
-        return i;
-      })
-      .filter((i) => i !== -1);
-
-    // 2. Jika tidak ada lunas → bersihkan semua reward
-    if (normalPaid.length === 0) {
-      for (const m of months) {
-        const p = payments[m];
-        if (p?.isReward) {
-          await firestoreService.update("kkData", rowId, {
-            [`payments_${year}.${m}.isReward`]: false,
-            [`payments_${year}.${m}.amount`]: p.originalAmount ?? 0,
-            [`payments_${year}.${m}.status`]: "belum_bayar",
-          });
-        }
-      }
-      return;
-    }
-
-    // 3. Hitung streak berurutan HANYA dari normalPaid
-    let longestStreak = 1;
-    let cur = 1;
-
-    for (let i = 1; i < normalPaid.length; i++) {
-      if (normalPaid[i] === normalPaid[i - 1] + 1) {
-        cur++;
-        longestStreak = Math.max(longestStreak, cur);
-      } else {
-        cur = 1;
-      }
-    }
-
-    // 4. Hitung reward lama
-    const rewardMonths = months.filter((m) => payments[m]?.isReward);
-    const rewardBefore = rewardMonths.length;
-
-    // 5. Tentukan reward yang seharusnya
-    let allowedRewards = 0;
-    if (longestStreak >= 12) allowedRewards = 2;
-    else if (longestStreak >= 6) allowedRewards = 1;
-
-    // 6. Jika reward lama lebih banyak → hapus reward bulan paling akhir
-    if (rewardBefore > allowedRewards) {
-      const toRemove = rewardMonths.slice(0, rewardBefore - allowedRewards);
-
-      for (const m of toRemove) {
-        const p = payments[m];
-        await firestoreService.update("kkData", rowId, {
-          [`payments_${year}.${m}.isReward`]: false,
-          [`payments_${year}.${m}.amount`]: p.originalAmount ?? 0,
-          [`payments_${year}.${m}.status`]: "belum_bayar",
-        });
-      }
-    }
-  };
-
-  const handleCancelPayment = (rowId, month) => {
-    if (lockStatus.locked) {
-      Swal.fire({
-        icon: "warning",
-        title: "Terkunci!",
-        text: "Monitoring RT sedang ON. Tidak dapat membatalkan pembayaran.",
-      });
-      return;
-    }
-
-    const row = filteredData.find((item) => item.id === rowId);
-    if (!row) return;
-
-    const currentMonthIndex = months.indexOf(month);
-    const currentDate = new Date();
-    const currentRealMonthIndex = currentDate.getMonth();
-
-    const userRole = user?.level_user?.toLowerCase() || "";
-    const canCancelDirectly =
-      userRole === "pak rt" || userRole === "superadmin";
-
-    const hasLaterPayments = months
-      .slice(currentRealMonthIndex + 1)
-      .some((laterMonth) => {
-        const laterMonthIndex = months.indexOf(laterMonth);
-        return (
-          laterMonthIndex > currentMonthIndex &&
-          row.payments[laterMonth]?.status === "lunas"
-        );
-      });
-
-    if (hasLaterPayments) {
-      Swal.fire({
-        icon: "error",
-        title: "Tidak Dapat Dibatalkan",
-        text: "Tidak bisa dibatalkan jika bulan setelah bulan berjalan yang dipilih status bayar lunas",
-        confirmButtonText: "OK",
-        customClass: {
-          popup: "max-h-screen overflow-y-auto",
-        },
-      });
-      closeContextMenu();
-      return;
-    }
-
-    if (!canCancelDirectly) {
-      const isApprovedByAuthorizedRole =
-        row.payments[month]?.approved_by_rt ||
-        row.payments[month]?.approved_by_superadmin;
-
-      if (!isApprovedByAuthorizedRole) {
-        Swal.fire({
-          icon: "error",
-          title: "Tidak Dapat Dibatalkan",
-          text: "Bendahara dan role lainnya tidak bisa membatalkan pembayaran kecuali sudah di-approve oleh Pak RT atau Superadmin",
-          confirmButtonText: "OK",
-          customClass: {
-            popup: "max-h-screen overflow-y-auto",
-          },
-        });
-        closeContextMenu();
-        return;
-      }
-    }
-
-    const roleText = canCancelDirectly
-      ? "Anda memiliki akses untuk membatalkan pembayaran ini."
-      : "Pembayaran ini sudah di-approve untuk dibatalkan.";
-
-    Swal.fire({
-      title: "Konfirmasi Batal Bayar",
-      html: `
-        <p>Apakah Anda yakin ingin membatalkan pembayaran bulan ${month}?</p>
-        <p class="text-sm text-gray-600 mt-2">${roleText}</p>
-      `,
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonColor: "#ef4444",
-      cancelButtonColor: "#6b7280",
-      confirmButtonText: "Ya, Batal Bayar",
-      cancelButtonText: "Tidak",
-      customClass: {
-        popup: "max-h-screen overflow-y-auto",
-      },
-    }).then((result) => {
-      if (result.isConfirmed) {
-        updateIurPayment(rowId, month, {
-          status: "belum_bayar",
-          tanggal_bayar: null,
-          cancelled_by: user?.nama || "Unknown",
-          cancelled_at: new Date().toISOString(),
-        });
+        await loadAllData();
 
         Swal.fire({
           icon: "success",
           title: "Berhasil",
-          text: "Pembayaran berhasil dibatalkan!",
-          timer: 2000,
+          text: `${successCount} pembayaran berhasil diproses, dicatat ke Laporan Keuangan, dan WA terkirim!`,
+          timer: 2500,
           showConfirmButton: false,
         });
+      } catch (err) {
+        console.error("Batch payment error:", err);
+        Swal.fire("Error", "Terjadi kesalahan saat memproses pembayaran.", "error");
       }
-      closeContextMenu();
-    });
+    }
   };
 
   const getCellStyle = (payment) => {
@@ -1031,23 +933,22 @@ const IURKuPage = () => {
     if (payment.isPembebasan) return "bg-purple-500 text-white";
     if (payment.isPenghapusan) return "bg-gray-500 text-white";
     if (payment.isKeringanan) return "bg-yellow-400 text-black";
-
     if (payment.status === "lunas") return "bg-green-500 text-white";
-
     return "bg-red-100 text-red-700";
   };
 
   const selectedTotal = useMemo(() => {
     let total = 0;
-
     const paymentArray = Array.from(selectedPayments);
 
-    // Hitung total bulan reward: 1 reward untuk 6, 2 reward untuk 12
-    const rewardMonths = calculateRewardDiscount(paymentArray);
+    if (paymentArray.length === 0) return 0;
 
-    // Ambil 1 atau 2 bulan reward
-    const rewardMonthList =
-      rewardMonths > 0 ? getRewardMonths(paymentArray) : [];
+    const sampleKey = paymentArray[0];
+    const sampleRowId = sampleKey.substring(0, sampleKey.lastIndexOf("-", sampleKey.lastIndexOf("-") - 1));
+    const sampleRow = filteredData.find((item) => item.id === sampleRowId);
+    const pembukuanType = sampleRow?.pembukuan || "RT";
+
+    const rewardKeysSet = new Set(calculateRewardMonthsFromBatch(paymentArray, pembukuanType));
 
     paymentArray.forEach((paymentKey) => {
       const parts = paymentKey.split("-");
@@ -1058,16 +959,19 @@ const IURKuPage = () => {
       const row = filteredData.find((item) => item.id === rowId);
       if (!row) return;
 
+      if (rewardKeysSet.has(paymentKey)) {
+        return; 
+      }
+
       const nominal = getNominalForMonth(
         row.id,
-        month,
+        month.toLowerCase(),
         selectedYear,
         row.pembukuan,
         "display"
       );
 
-      // Jika bulan ini adalah bulan reward → GRATIS
-      if (rewardMonthList.includes(month)) {
+      if (nominal.isReward || nominal.isPembebasan) {
         return;
       }
 
@@ -1075,16 +979,14 @@ const IURKuPage = () => {
     });
 
     return total;
-  }, [selectedPayments, filteredData]);
+  }, [selectedPayments, filteredData, rewardData]);
 
   if (loading) {
     return (
       <div className="p-6 space-y-6">
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="text-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Memuat data pembayaran iuran...</p>
-          </div>
+        <div className="bg-white rounded-lg shadow-sm p-6 text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Memuat data pembayaran iuran...</p>
         </div>
       </div>
     );
@@ -1095,7 +997,9 @@ const IURKuPage = () => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">IUR-Ku</h1>
-          <p className="text-gray-600">Kelola pembayaran iuran warga</p>
+          <p className="text-gray-600">
+            Kelola pembayaran iuran warga terintegrasi Reward Sadar IW & Laporan Keuangan
+          </p>
         </div>
         <div className="flex gap-2">
           {selectedPayments.size > 0 && (
@@ -1150,30 +1054,27 @@ const IURKuPage = () => {
               <span className="text-blue-700">Lunas (Normal)</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-blue-500 rounded"></div>
-              <span className="text-blue-700">Lunas (Reward)</span>
+              <div className="w-4 h-4 bg-blue-600 rounded"></div>
+              <span className="text-blue-700">Lunas (Reward Berdasarkan Frequency)</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-red-50 border border-red-200 rounded"></div>
+              <div className="w-4 h-4 bg-purple-500 rounded"></div>
+              <span className="text-blue-700">Pembebasan / Keringanan</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-red-100 border border-red-200 rounded"></div>
               <span className="text-blue-700">Belum Bayar</span>
             </div>
           </div>
         </div>
-
-        {selectedPayments.size > 0 && (
-          <div className="bg-green-50 border border-green-200 rounded-md p-3">
-            <p className="text-green-600 text-sm">
-              <strong>Total yang dipilih:</strong> Rp{" "}
-              {selectedTotal.toLocaleString("id-ID")} ({selectedPayments.size}{" "}
-              pembayaran)
-            </p>
-          </div>
-        )}
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
         {selectedPayments.size > 0 && (
-          <div className="px-6 py-4 bg-gray-50 border-b flex justify-end">
+          <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
+            <span className="text-sm font-medium text-gray-700">
+              Total Tagihan Dipilih: Rp {selectedTotal.toLocaleString("id-ID")}
+            </span>
             <button
               onClick={handleBatchPayment}
               className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium shadow-sm"
@@ -1190,36 +1091,36 @@ const IURKuPage = () => {
               <tr>
                 <th
                   rowSpan={2}
-                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300"
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase border border-gray-300"
                 >
                   NO
                 </th>
                 <th
                   rowSpan={2}
-                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300"
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase border border-gray-300"
                 >
                   Nama KK
                 </th>
                 <th
                   rowSpan={2}
-                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300"
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase border border-gray-300"
                 >
                   Alamat
                 </th>
                 <th
                   colSpan={12}
-                  className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300"
+                  className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase border border-gray-300"
                 >
-                  Bulan
+                  Bulan Pembayaran ({selectedYear})
                 </th>
               </tr>
               <tr>
-                {monthNames.map((month) => (
+                {months.map((month, idx) => (
                   <th
                     key={month}
-                    className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-300"
+                    className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase border border-gray-300"
                   >
-                    {month}
+                    {monthNames[idx]}
                   </th>
                 ))}
               </tr>
@@ -1230,7 +1131,7 @@ const IURKuPage = () => {
                   <td className="px-4 py-3 text-sm text-gray-900 border border-gray-300">
                     {startIndex + index + 1}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-900 border border-gray-300">
+                  <td className="px-4 py-3 text-sm text-gray-900 border border-gray-300 font-medium">
                     {row.nama_kk}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-900 border border-gray-300">
@@ -1248,6 +1149,7 @@ const IURKuPage = () => {
                       payment.isReward ||
                       payment.isPembebasan ||
                       payment.isPenghapusan;
+
                     const nominal = getNominalForMonth(
                       row.id,
                       month,
@@ -1256,10 +1158,9 @@ const IURKuPage = () => {
                       "display"
                     );
 
-                    // originalAmount is the actual besaran rate before any adjustments (reward, keringanan, etc)
                     const displayAmount =
-                      payment.isPembebasan || payment.isPenghapusan
-                        ? nominal.originalAmount // Show actual amount for exempted statuses
+                      payment.isPembebasan || payment.isPenghapusan || payment.isReward
+                        ? 0
                         : nominal.amount > 0
                         ? nominal.amount
                         : isSelected
@@ -1276,7 +1177,7 @@ const IURKuPage = () => {
                           handleRightClick(e, row.id, month, payment)
                         }
                       >
-                        <div className="relative">
+                        <div className="relative pointer-events-none sm:pointer-events-auto">
                           {!isPaid && !isNonPayable && (
                             <div className="flex justify-center mb-1">
                               <input
@@ -1291,60 +1192,23 @@ const IURKuPage = () => {
                                 }
                                 onClick={(e) => e.stopPropagation()}
                                 title="Pilih untuk pembayaran"
-                                className={`
-      w-5 h-5 cursor-pointer
-      appearance-none
-      border-2 border-gray-400 rounded-full bg-white
-      checked:bg-blue-600 checked:border-blue-600
-      hover:border-blue-500
-      focus:ring-2 focus:ring-blue-500 focus:ring-offset-1
-      transition-colors
-    `}
+                                className="w-4 h-4 cursor-pointer accent-blue-600 rounded"
                               />
                             </div>
                           )}
 
-                          <div
-                            className={`font-medium ${
-                              isPaid ? "text-white" : ""
-                            }`}
-                          >
+                          <div className={`font-medium pointer-events-auto ${isPaid ? "text-white" : ""}`}>
                             Rp {displayAmount.toLocaleString("id-ID")}
                           </div>
 
                           {isPaid && payment.isReward && (
-                            <div className="text-xs mt-1 text-white opacity-90 font-semibold">
+                            <div className="text-[10px] mt-1 text-white font-bold bg-blue-700 rounded px-1">
                               REWARD
                             </div>
                           )}
-
                           {isPaid && payment.isPembebasan && (
-                            <div className="text-xs mt-1 text-white opacity-90 font-semibold">
-                              PEMBEBASAN
-                            </div>
-                          )}
-
-                          {isPaid && payment.isPenghapusan && (
-                            <div className="text-xs mt-1 text-white opacity-90 font-semibold">
-                              PENGHAPUSAN
-                            </div>
-                          )}
-
-                          {isPaid && payment.isKeringanan && (
-                            <div className="text-xs mt-1 text-white opacity-90 font-semibold">
-                              KERINGANAN
-                            </div>
-                          )}
-
-                          {isPaid && payment.tanggal_bayar && (
-                            <div className="text-xs mt-1 text-white opacity-90">
-                              {new Date(
-                                payment.tanggal_bayar
-                              ).toLocaleDateString("id-ID", {
-                                day: "numeric",
-                                month: "short",
-                                year: "2-digit",
-                              })}
+                            <div className="text-[10px] mt-1 text-white font-bold bg-purple-700 rounded px-1">
+                              BEBAS
                             </div>
                           )}
                         </div>
