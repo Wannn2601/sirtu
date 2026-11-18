@@ -31,7 +31,7 @@ const IURKuPage = () => {
   const [keringananData, setKeringananData] = useState([]);
   const { lockStatus } = useBendaharaLock();
 
-  const FONNTE_TOKEN = "VjmncfdGbtxg9J3NhNyt";
+  const FONNTE_TOKEN = "YgWtBV2NEqbVWtu2b4Ne";
 
   const months = [
     "januari",
