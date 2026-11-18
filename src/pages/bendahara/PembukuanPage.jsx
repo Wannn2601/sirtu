@@ -144,7 +144,7 @@ const PembukaanPage = () => {
   const getPenandatanganInfo = () => {
     const isPkk = selectedPembukuan === "PKK";
 
-    const ketuaJabatanTarget = isPkk ? "ketua pkk" : "pak rt";
+    const ketuaJabatanTarget = isPkk ? "ketua pkk" : "ketua rt";
     const bendaharaJabatanTarget = isPkk ? "bendahara pkk" : "bendahara rt";
 
     const ketua = pengurusList.find(
