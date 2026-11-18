@@ -14,7 +14,8 @@ const PembukaanPage = () => {
   const [rekeningKegiatanData, setRekeningKegiatanData] = useState([]);
   const [subRekeningKegiatanData, setSubRekeningKegiatanData] = useState([]);
   const [userData, setUserData] = useState(null);
-  const [pengurusList, setPengurusList] = useState([]); // 🟢 State untuk data pengurus RT/PKK
+  const [pengurusList, setPengurusList] = useState([]);
+  const [kkList, setKkList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -22,7 +23,7 @@ const PembukaanPage = () => {
   const [modalMode, setModalMode] = useState("add");
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedPembukuan, setSelectedPembukuan] = useState("RT"); // Default RT
+  const [selectedPembukuan, setSelectedPembukuan] = useState("RT");
   const [selectedJenisPembukuan, setSelectedJenisPembukuan] =
     useState("keseluruhan");
   const [searchTerm, setSearchTerm] = useState("");
@@ -31,9 +32,8 @@ const PembukaanPage = () => {
 
   const { lockStatus } = useBendaharaLock();
 
-  const defaultRekenings = [
-    { id: "1", kelompok_pembukuan: "Kas", status: "aktif", is_locked: true },
-  ];
+  // 🟢 Token Fonnte sesuai permintaan
+  const FONNTE_TOKEN = "YgWtBV2NEqbVWtu2b4Ne";
 
   const defaultSubRekenings = [
     {
@@ -91,6 +91,10 @@ const PembukaanPage = () => {
     id_user: "",
     jabatan_user: "",
     no_arsip: "",
+    tipe_donatur: "warga",
+    id_warga_kk: "",
+    nama_donatur: "",
+    no_wa_donatur: "",
   });
 
   useEffect(() => {
@@ -117,17 +121,19 @@ const PembukaanPage = () => {
         setSelectedPembukuan("PKK");
       }
 
-      const [pembukaanList, rekeningList, subRekeningList, pengurusListRes] = await Promise.all([
+      const [pembukaanList, rekeningList, subRekeningList, pengurusListRes, kkDataRes] = await Promise.all([
         firestoreService.getAll("laporanKeuangan"),
         firestoreService.getAll("rekeningKegiatan"),
         firestoreService.getAll("subRekeningKegiatan"),
-        firestoreService.getAll("pengurusRT"), // 🟢 Ambil data pengurus dari Firebase
+        firestoreService.getAll("pengurusRT"),
+        firestoreService.getAll("kkData"),
       ]);
 
       setPembukaanData(pembukaanList);
       setRekeningKegiatanData(rekeningList);
       setSubRekeningKegiatanData(subRekeningList);
-      setPengurusList(pengurusListRes || []); // 🟢 Simpan ke state pengurus
+      setPengurusList(pengurusListRes || []);
+      setKkList(kkDataRes || []);
     } catch (error) {
       console.error("Error loading data:", error);
       Swal.fire({
@@ -140,10 +146,15 @@ const PembukaanPage = () => {
     }
   };
 
-  // 🟢 Fungsi helper untuk mendeteksi penandatangan berdasarkan referensi jabatan di Firebase
+  const generateAutoNoArsip = () => {
+    const randomSixDigits = Math.floor(100000 + Math.random() * 900000);
+    const now = new Date();
+    const currentMonth = String(now.getMonth() + 1).padStart(2, "0");
+    return `${randomSixDigits}.${currentMonth}`;
+  };
+
   const getPenandatanganInfo = () => {
     const isPkk = selectedPembukuan === "PKK";
-
     const ketuaJabatanTarget = isPkk ? "ketua pkk" : "ketua rt";
     const bendaharaJabatanTarget = isPkk ? "bendahara pkk" : "bendahara rt";
 
@@ -165,6 +176,28 @@ const PembukaanPage = () => {
       labelBendahara: isPkk ? "Bendahara PKK" : "Bendahara RT",
       namaBendahara: bendahara?.nama_warga || "[Nama Bendahara]",
     };
+  };
+
+  const sendFonnteNotification = async (targetPhone, messageText) => {
+    try {
+      const response = await fetch("https://api.fonnte.com/send", {
+        method: "POST",
+        headers: {
+          "Authorization": FONNTE_TOKEN,
+        },
+        body: new URLSearchParams({
+          target: targetPhone,
+          message: messageText,
+        }),
+      });
+
+      const result = await response.json();
+      if (!result.status) {
+        console.error("Gagal mengirim pesan Fonnte:", result.reason);
+      }
+    } catch (error) {
+      console.error("Error Fonnte API:", error);
+    }
   };
 
   const months = [
@@ -190,28 +223,11 @@ const PembukaanPage = () => {
 
   const toTerbilang = (angka) => {
     const satuan = [
-      "",
-      "Satu",
-      "Dua",
-      "Tiga",
-      "Empat",
-      "Lima",
-      "Enam",
-      "Tujuh",
-      "Delapan",
-      "Sembilan",
+      "", "Satu", "Dua", "Tiga", "Empat", "Lima", "Enam", "Tujuh", "Delapan", "Sembilan",
     ];
     const belasan = [
-      "Sepuluh",
-      "Sebelas",
-      "Dua Belas",
-      "Tiga Belas",
-      "Empat Belas",
-      "Lima Belas",
-      "Enam Belas",
-      "Tujuh Belas",
-      "Delapan Belas",
-      "Sembilan Belas",
+      "Sepuluh", "Sebelas", "Dua Belas", "Tiga Belas", "Empat Belas", "Lima Belas", 
+      "Enam Belas", "Tujuh Belas", "Delapan Belas", "Sembilan Belas",
     ];
 
     if (angka === 0) return "Nol Rupiah";
@@ -268,7 +284,8 @@ const PembukaanPage = () => {
       item.keterangan?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.uraian?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.detail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.no_arsip?.toLowerCase().includes(searchTerm.toLowerCase());
+      item.no_arsip?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.nama_donatur?.toLowerCase().includes(searchTerm.toLowerCase());
 
     return (
       matchesYear &&
@@ -327,6 +344,7 @@ const PembukaanPage = () => {
   const handleOpenModal = (mode, data = null) => {
     if (mode === "add") {
       setModalMode(mode);
+      const generatedArsip = generateAutoNoArsip();
       setFormData({
         id: null,
         tanggal: new Date().toISOString().split("T")[0],
@@ -345,7 +363,11 @@ const PembukaanPage = () => {
         dibuat_oleh: userData?.nama || "",
         id_user: userData?.id || "",
         jabatan_user: userData?.jabatan || userData?.level || "",
-        no_arsip: "",
+        no_arsip: generatedArsip,
+        tipe_donatur: "warga",
+        id_warga_kk: "",
+        nama_donatur: "",
+        no_wa_donatur: "",
       });
       setShowModal(true);
     } else if (mode === "edit" && lockStatus.locked) {
@@ -367,6 +389,13 @@ const PembukaanPage = () => {
           return;
         }
 
+        let cleanWa = data.no_wa_donatur || "";
+        if (cleanWa.startsWith("+62")) {
+          cleanWa = cleanWa.replace("+62", "");
+        } else if (cleanWa.startsWith("62")) {
+          cleanWa = cleanWa.replace("62", "");
+        }
+
         setFormData({
           id: data.id,
           tanggal: data.tanggal,
@@ -386,7 +415,11 @@ const PembukaanPage = () => {
           id_user: data.id_user || userData?.id || "",
           jabatan_user:
             data.jabatan_user || userData?.jabatan || userData?.level || "",
-          no_arsip: data.no_arsip || "",
+          no_arsip: data.no_arsip || generateAutoNoArsip(),
+          tipe_donatur: data.tipe_donatur || "warga",
+          id_warga_kk: data.id_warga_kk || "",
+          nama_donatur: data.nama_donatur || "",
+          no_wa_donatur: cleanWa,
         });
       }
       setShowModal(true);
@@ -437,6 +470,60 @@ const PembukaanPage = () => {
       return;
     }
 
+    const allSubRekenings = [
+      ...defaultSubRekenings,
+      ...subRekeningKegiatanData,
+    ];
+    const selectedSubRek = allSubRekenings.find(
+      (item) => item.id.toString() === formData.id_sub_rekening_asal
+    );
+    const subRekUraianLower = selectedSubRek?.uraian?.toLowerCase() || "";
+    
+    const isSpecialNotification = 
+      subRekUraianLower.includes("donatur pembangunan") || 
+      subRekUraianLower.includes("pemanfaatan/peminjaman aset rt");
+
+    let finalNamaDonatur = "";
+    let finalNoWaDonatur = "";
+
+    if (isSpecialNotification) {
+      if (formData.tipe_donatur === "warga") {
+        if (!formData.id_warga_kk) {
+          Swal.fire({ icon: "warning", title: "Peringatan!", text: "Silakan pilih Warga terlebih dahulu!" });
+          return;
+        }
+        const selectedWarga = kkList.find((w) => w.id.toString() === formData.id_warga_kk.toString());
+        finalNamaDonatur = selectedWarga?.nama_kepala_keluarga || selectedWarga?.nama || "";
+        finalNoWaDonatur = selectedWarga?.no_hp || selectedWarga?.no_wa || selectedWarga?.no_telepon || "";
+
+        if (!finalNoWaDonatur) {
+          Swal.fire({ icon: "warning", title: "Peringatan!", text: "Warga yang dipilih tidak memiliki nomor HP (no_hp) di data KK!" });
+          return;
+        }
+      } else {
+        if (!formData.nama_donatur.trim()) {
+          Swal.fire({ icon: "warning", title: "Peringatan!", text: "Nama/Peminjam wajib diisi!" });
+          return;
+        }
+        if (!formData.no_wa_donatur.trim()) {
+          Swal.fire({ icon: "warning", title: "Peringatan!", text: "Nomor WhatsApp wajib diisi!" });
+          return;
+        }
+
+        const rawWa = formData.no_wa_donatur.trim();
+        if (rawWa.startsWith("0") || rawWa.startsWith("+62")) {
+          Swal.fire({
+            icon: "error",
+            title: "Format Nomor Salah!",
+            text: "Jangan gunakan angka '0' di depan atau awalan '+62'. Masukkan nomor setelah +62 (contoh: 81234567890).",
+          });
+          return;
+        }
+        finalNamaDonatur = formData.nama_donatur;
+        finalNoWaDonatur = `+62${rawWa}`;
+      }
+    }
+
     if (
       !formData.tanggal ||
       !formData.id_sub_rekening_asal ||
@@ -483,11 +570,8 @@ const PembukaanPage = () => {
     try {
       setLoading(true);
 
-      const subRekeningAsal = subRekeningKegiatanData.find(
+      const subRekeningAsal = allSubRekenings.find(
         (item) => item.id.toString() === formData.id_sub_rekening_asal
-      );
-      const subRekeningTujuan = subRekeningKegiatanData.find(
-        (item) => item.id.toString() === formData.id_sub_rekening_tujuan
       );
 
       if (formData.jenis_pembukuan === "Mutasi Anggaran") {
@@ -586,16 +670,46 @@ const PembukaanPage = () => {
           dibuat_oleh: userData?.nama || "",
           createdAt: new Date().toISOString(),
           no_arsip: formData.no_arsip,
+          ...(isSpecialNotification && {
+            tipe_donatur: formData.tipe_donatur,
+            id_warga_kk: formData.tipe_donatur === "warga" ? formData.id_warga_kk : null,
+            nama_donatur: finalNamaDonatur,
+            no_wa_donatur: finalNoWaDonatur,
+          }),
         };
 
+        let generatedId = formData.id;
         if (modalMode === "add") {
-          await firestoreService.add("laporanKeuangan", laporanData);
+          const resAdd = await firestoreService.add("laporanKeuangan", laporanData);
+          generatedId = resAdd?.id || formData.no_arsip;
         } else {
           await firestoreService.update(
             "laporanKeuangan",
             formData.id,
             laporanData
           );
+        }
+
+        if (isSpecialNotification) {
+          let cleanWaTarget = finalNoWaDonatur.trim().replace(/\D/g, "");
+          if (cleanWaTarget.startsWith("0")) {
+            cleanWaTarget = "62" + cleanWaTarget.slice(1);
+          } else if (cleanWaTarget.startsWith("+62")) {
+            cleanWaTarget = "62" + cleanWaTarget.slice(3);
+          } else if (!cleanWaTarget.startsWith("62")) {
+            cleanWaTarget = "62" + cleanWaTarget;
+          }
+
+          const noArsipText = formData.no_arsip || generatedId;
+          const uraianText = formData.keterangan.trim() || "Pemanfaatan/Peminjaman Aset RT";
+          const nominalFormatted = formatCurrency(jumlahValue);
+          const rtVal = userData?.RT || userData?.rt || "-";
+          const rwVal = userData?.RW || userData?.rw || "-";
+          const kelVal = userData?.Kelurahan || userData?.kelurahan || "-";
+
+          const pesanWa = `Tanda Terima ${noArsipText} guna ${uraianText} sebesar ${nominalFormatted}. Atas nama warga RT ${rtVal} RW ${rwVal} Kel. ${kelVal} menyampaikan Terima Kasih sebesar-besarnya, Semoga Rahmat Kesehatan dan Kelancaran Rizqi tercurah untuk Bapak/Ibu/Sdr ${finalNamaDonatur} dan Keluarga. Aamin`;
+
+          await sendFonnteNotification(cleanWaTarget, pesanWa);
         }
       }
 
@@ -604,8 +718,8 @@ const PembukaanPage = () => {
         title: "Berhasil!",
         text: `Data pembukuan berhasil ${
           modalMode === "add" ? "ditambahkan" : "diupdate"
-        }`,
-        timer: 2000,
+        } ${isSpecialNotification ? "dan Pesan WA Tanda Terima telah dikirim." : ""}`,
+        timer: 2500,
         showConfirmButton: false,
       });
 
@@ -657,19 +771,15 @@ const PembukaanPage = () => {
       try {
         setLoading(true);
 
-        // 1. Cek apakah transaksi ini berasal dari IUR-Ku (biasanya lewat id_sub_rekening_kegiatan "1.2" atau "2.2" atau ada format nama di detail)
         const detailText = item.detail || item.keterangan || "";
         const isIurPayment = item.id_sub_rekening_kegiatan === "1.2" || item.id_sub_rekening_kegiatan === "2.2" || detailText.toLowerCase().includes("ipl bulan");
 
         if (isIurPayment) {
-          // Ambil semua data warga (kkData) untuk mencocokkan nama kepala keluarga yang ada di dalam string 'detail'
           const allKkData = await firestoreService.getAll("kkData");
           
           for (const kk of allKkData) {
             const namaWarga = (kk.nama_kepala_keluarga || kk.nama || "").trim();
             if (namaWarga && detailText.toLowerCase().includes(namaWarga.toLowerCase())) {
-              // Cari tahu tahun dan bulan apa saja yang tercantum di detail (contoh: mar'26 atau maret)
-              // Kita periksa semua tahun pembayaran yang ada di dokumen kk (misal payments_2026, payments_2025)
               const paymentKeys = Object.keys(kk).filter(k => k.startsWith("payments_"));
               
               for (const pKey of paymentKeys) {
@@ -678,7 +788,6 @@ const PembukaanPage = () => {
                 const updatedMonthsMap = { ...monthsMap };
                 let needUpdate = false;
 
-                // Daftar singkatan bulan dan nama bulan lengkap
                 const monthMapping = {
                   "jan": "januari", "feb": "februari", "mar": "maret", "apr": "april",
                   "mei": "mei", "jun": "juni", "jul": "juli", "agt": "agustus", "sep": "september",
@@ -686,7 +795,6 @@ const PembukaanPage = () => {
                 };
 
                 for (const [shortM, fullM] of Object.entries(monthMapping)) {
-                  // Cek apakah string detail mengandung nama bulan dan tahun transaksi
                   const yearShort = yearNum.slice(-2);
                   if (
                     (detailText.toLowerCase().includes(shortM) || detailText.toLowerCase().includes(fullM)) &&
@@ -717,7 +825,6 @@ const PembukaanPage = () => {
           }
         }
 
-        // 2. Hapus data di laporan keuangan (seperti penanganan mutasi atau data biasa)
         if (item.jenis_pembukuan === "Mutasi Anggaran") {
           await firestoreService.delete("laporanKeuangan", id);
 
@@ -749,7 +856,7 @@ const PembukaanPage = () => {
         Swal.fire({
           icon: "success",
           title: "Berhasil!",
-          text: "Data pembukuan dihapus dan status IUR-Ku warga telah di-reset.",
+          text: "Data pembukuan dihapus.",
           timer: 2000,
           showConfirmButton: false,
         });
@@ -807,6 +914,7 @@ const PembukaanPage = () => {
         "No Arsip": item.no_arsip || "",
         Uraian: item.uraian || "",
         Kegiatan: item.detail || item.keterangan || "",
+        "Nama Donatur": item.nama_donatur || "-",
         Pembukuan: item.pembukuan || "",
         Penerimaan: item.penerimaan || 0,
         Pengeluaran: item.pengeluaran || 0,
@@ -839,7 +947,7 @@ const PembukaanPage = () => {
   const exportToPDF = () => {
     try {
       const doc = new jsPDF();
-      const ttd = getPenandatanganInfo(); // 🟢 Ambil info TTD dinamis
+      const ttd = getPenandatanganInfo(); 
 
       doc.setFontSize(16);
       doc.text("Histori Pembukuan Keuangan", 14, 15);
@@ -858,9 +966,6 @@ const PembukaanPage = () => {
         const rt = userData.rt || userData.RT || "-";
         const rw = userData.rw || userData.RW || "-";
         const kelurahan = userData.kelurahan || userData.Kelurahan || "-";
-        const kecamatan = userData.kecamatan || userData.Kecamatan || "-";
-        const kabupaten =
-          userData.kabupaten_kota || userData.Kabupaten_Kota || "-";
 
         doc.text(`RT ${rt} RW ${rw} Kelurahan ${kelurahan}`, 14, 35);
       }
@@ -873,6 +978,7 @@ const PembukaanPage = () => {
           item.no_arsip || "",
           item.uraian || "",
           item.detail || item.keterangan || "",
+          item.nama_donatur || "-",
           item.pembukuan || "",
           formatCurrency(item.penerimaan || 0),
           formatCurrency(item.pengeluaran || 0),
@@ -889,6 +995,7 @@ const PembukaanPage = () => {
             "No Arsip",
             "Uraian",
             "Kegiatan",
+            "Donatur",
             "Pembukuan",
             "Penerimaan",
             "Pengeluaran",
@@ -897,14 +1004,12 @@ const PembukaanPage = () => {
           ],
         ],
         body: tableData,
-        styles: { fontSize: 8 },
+        styles: { fontSize: 7 },
         headStyles: { fillColor: [66, 139, 202] },
         didDrawPage: (data) => {
           const pageHeight = doc.internal.pageSize.height;
           const pageWidth = doc.internal.pageSize.width;
-          const printedAt = new Date().toLocaleString("id-ID");
 
-          // 🟢 Tambahkan Tanda Tangan di PDF AutoTable
           const finalY = data.cursor.finalY + 15;
           if (finalY < pageHeight - 40) {
             doc.setFontSize(10);
@@ -956,8 +1061,15 @@ const PembukaanPage = () => {
     });
   };
 
-  // 🟢 Ambil data tanda tangan aktif berdasarkan filter Pembukuan saat ini
   const currentTtd = getPenandatanganInfo();
+  
+  const activeSelectedSubRek = [...defaultSubRekenings, ...subRekeningKegiatanData].find(
+    (sr) => sr.id.toString() === formData.id_sub_rekening_asal
+  );
+  const activeSubRekUraianLower = activeSelectedSubRek?.uraian?.toLowerCase() || "";
+  const showSpecialInput = 
+    activeSubRekUraianLower.includes("donatur pembangunan") || 
+    activeSubRekUraianLower.includes("pemanfaatan/peminjaman aset rt");
 
   return (
     <div className="p-6">
@@ -1103,7 +1215,7 @@ const PembukaanPage = () => {
           />
           <input
             type="text"
-            placeholder="Cari data dalam tabel..."
+            placeholder="Cari data dalam tabel (Uraian, Keterangan, Nama Donatur/Peminjam)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1124,7 +1236,10 @@ const PembukaanPage = () => {
                   No Arsip
                 </th>
                 <th className="border border-gray-400 px-3 py-2 text-sm font-semibold text-left">
-                  Uraian
+                  Uraian / Keterangan
+                </th>
+                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold text-left">
+                  Nama Donatur / Peminjam
                 </th>
                 <th className="border border-gray-400 px-3 py-2 text-sm font-semibold text-right">
                   Penerimaan
@@ -1143,13 +1258,13 @@ const PembukaanPage = () => {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-8">
+                  <td colSpan="8" className="text-center py-8">
                     Loading...
                   </td>
                 </tr>
               ) : paginatedData.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-8 text-gray-500">
+                  <td colSpan="8" className="text-center py-8 text-gray-500">
                     Tidak ada data
                   </td>
                 </tr>
@@ -1159,19 +1274,22 @@ const PembukaanPage = () => {
                     <td className="border border-gray-400 px-3 py-2 text-sm">
                       {formatDate(item.tanggal)}
                     </td>
-                    <td className="border border-gray-400 px-3 py-2 text-sm">
+                    <td className="border border-gray-400 px-3 py-2 text-sm font-semibold text-gray-700">
                       {item.no_arsip || "-"}
                     </td>
                     <td className="border border-gray-400 px-3 py-2 text-sm">
                       <span
                         className={
                           item.jenis_pembukuan === "Mutasi Anggaran"
-                            ? "text-green-600"
+                            ? "text-green-600 font-medium"
                             : ""
                         }
                       >
-                        {item.detail || "-"}
+                        {item.detail || item.uraian || "-"}
                       </span>
+                    </td>
+                    <td className="border border-gray-400 px-3 py-2 text-sm font-medium text-blue-700">
+                      {item.nama_donatur || "-"}
                     </td>
                     <td className="border border-gray-400 px-3 py-2 text-sm text-right">
                       {formatCurrency(item.penerimaan || 0)}
@@ -1260,7 +1378,7 @@ const PembukaanPage = () => {
         </div>
       </div>
 
-      {/* 🟢 BAGIAN TANDA TANGAN DINAMIS DI BAWAH TABEL */}
+      {/* Tanda Tangan Dinamis Di Bawah Tabel */}
       <div className="mt-8 bg-white p-6 border border-gray-300 rounded-lg flex justify-between items-center text-sm">
         <div>
           <p className="font-medium">Mengetahui,</p>
@@ -1285,7 +1403,7 @@ const PembukaanPage = () => {
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center z-10">
               <h2 className="text-xl font-bold text-gray-800">
                 {modalMode === "add"
                   ? "Buat Pembukuan Keuangan"
@@ -1300,6 +1418,21 @@ const PembukaanPage = () => {
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  No Arsip (Otomatis)
+                </label>
+                <input
+                  type="text"
+                  value={formData.no_arsip}
+                  readOnly
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-600 font-mono cursor-not-allowed"
+                />
+                {/* <p className="text-xs text-gray-500 mt-1">
+                  *Format nomor arsip: 6 angka acak dan bulan berjalan (contoh: 123456.11) dan tidak dapat diubah.
+                </p> */}
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Tanggal
@@ -1403,6 +1536,143 @@ const PembukaanPage = () => {
                 </select>
               </div>
 
+              {/* INPUT KONDISIONAL UNTUK DONATUR & PEMANFAATAN ASET RT */}
+              {showSpecialInput && (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-md space-y-4">
+                  <h3 className="text-sm font-semibold text-blue-800">
+                    Informasi Pihak Terkait & Pengiriman Tanda Terima WA
+                  </h3>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Kategori Sumber <span className="text-red-500">*</span>
+                    </label>
+                    <div className="flex gap-6">
+                      <label className="flex items-center cursor-pointer">
+                        <input
+                          type="radio"
+                          name="tipe_donatur"
+                          value="warga"
+                          checked={formData.tipe_donatur === "warga"}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              tipe_donatur: e.target.value,
+                              id_warga_kk: "",
+                              nama_donatur: "",
+                              no_wa_donatur: "",
+                            })
+                          }
+                          className="mr-2"
+                        />
+                        Warga (Dari Data KK)
+                      </label>
+                      <label className="flex items-center cursor-pointer">
+                        <input
+                          type="radio"
+                          name="tipe_donatur"
+                          value="non_warga"
+                          checked={formData.tipe_donatur === "non_warga"}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              tipe_donatur: e.target.value,
+                              id_warga_kk: "",
+                              nama_donatur: "",
+                              no_wa_donatur: "",
+                            })
+                          }
+                          className="mr-2"
+                        />
+                        Non Warga (Input Manual)
+                      </label>
+                    </div>
+                  </div>
+
+                  {formData.tipe_donatur === "warga" ? (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Pilih Kepala Keluarga / Warga <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.id_warga_kk}
+                        onChange={(e) => {
+                          const wId = e.target.value;
+                          const selectedWarga = kkList.find((w) => w.id.toString() === wId.toString());
+                          setFormData({
+                            ...formData,
+                            id_warga_kk: wId,
+                            nama_donatur: selectedWarga?.nama_kepala_keluarga || selectedWarga?.nama || "",
+                            no_wa_donatur: selectedWarga?.no_hp || selectedWarga?.no_wa || selectedWarga?.no_telepon || "",
+                          });
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+                        required
+                      >
+                        <option value="">-- Pilih Warga --</option>
+                        {kkList.map((w) => (
+                          <option key={w.id} value={w.id}>
+                            {w.nama_kepala_keluarga || w.nama} {w.no_hp || w.no_wa ? `(HP: ${w.no_hp || w.no_wa})` : "(No HP Kosong)"}
+                          </option>
+                        ))}
+                      </select>
+                      {formData.id_warga_kk && (
+                        <div className="mt-2 p-2 bg-white border border-green-200 rounded-md">
+                          <p className="text-xs text-gray-700">
+                            Nama: <b className="text-blue-700">{formData.nama_donatur}</b>
+                          </p>
+                          <p className="text-xs text-gray-700 mt-1">
+                            Nomor WhatsApp: <b className="text-green-700">{formData.no_wa_donatur || "Tidak tersedia"}</b> 
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Nama <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.nama_donatur}
+                          onChange={(e) =>
+                            setFormData({ ...formData, nama_donatur: e.target.value })
+                          }
+                          className="w-full px-3 py-2 border rounded-md bg-white"
+                          placeholder="Masukkan nama lengkap..."
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Nomor WhatsApp <span className="text-red-500">*</span>
+                        </label>
+                        <div className="flex rounded-md shadow-sm">
+                          <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-100 text-gray-600 text-sm font-bold">
+                            +62
+                          </span>
+                          <input
+                            type="text"
+                            value={formData.no_wa_donatur}
+                            onChange={(e) =>
+                              setFormData({ ...formData, no_wa_donatur: e.target.value })
+                            }
+                            className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 bg-white"
+                            placeholder="81234567890 (tanpa 0 di depan)"
+                            required
+                          />
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          *Jangan ketik 0 atau +62 di depan nomor (cukup nomor setelahnya).
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Keterangan
@@ -1460,25 +1730,6 @@ const PembukaanPage = () => {
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  No Arsip
-                </label>
-                <input
-                  type="text"
-                  value={formData.no_arsip}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      no_arsip: e.target.value.slice(0, 5),
-                    })
-                  }
-                  maxLength={5}
-                  className="w-full px-3 py-2 border rounded-md"
-                  placeholder="Masukkan nomor arsip (maks 5 karakter)"
-                />
-              </div>
-
               <div className="mt-6 flex justify-end gap-3">
                 <button
                   type="button"
@@ -1525,6 +1776,12 @@ const PembukaanPage = () => {
                   </p>
                 </div>
                 <div>
+                  <p className="text-sm font-medium text-gray-700">No Arsip</p>
+                  <p className="text-sm font-mono font-semibold text-gray-900">
+                    {selectedDetail.no_arsip || "-"}
+                  </p>
+                </div>
+                <div>
                   <p className="text-sm font-medium text-gray-700">Pembukuan</p>
                   <p className="text-sm text-gray-900">
                     {selectedDetail.pembukuan || "-"}
@@ -1553,6 +1810,22 @@ const PembukaanPage = () => {
                     {selectedDetail.uraian || "-"}
                   </p>
                 </div>
+                {selectedDetail.nama_donatur && (
+                  <>
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Nama / Peminjam</p>
+                      <p className="text-sm text-blue-700 font-semibold">
+                        {selectedDetail.nama_donatur} ({selectedDetail.tipe_donatur === "warga" ? "Warga" : "Non-Warga"})
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">No WhatsApp</p>
+                      <p className="text-sm text-gray-900">
+                        {selectedDetail.no_wa_donatur || "-"}
+                      </p>
+                    </div>
+                  </>
+                )}
                 <div>
                   <p className="text-sm font-medium text-gray-700">
                     Penerimaan

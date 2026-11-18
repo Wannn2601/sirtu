@@ -75,7 +75,33 @@ const SetIuranWargaPage = () => {
   };
   const monthYearOptions = generateMonthYearOptions();
 
-  // ✅ Simpan / Edit data
+  // ✅ Edit (Diperbaiki agar mengisi bulan & tahun secara benar)
+  const handleEdit = (item) => {
+    setEditingItem(item);
+    
+    // Pecah bulan_berlaku jika formatnya "bulan-tahun" (contoh: "1-2026")
+    let bVal = currentMonth.toString();
+    let tVal = currentYear.toString();
+    
+    if (item.bulan_berlaku && item.bulan_berlaku.includes("-")) {
+      const parts = item.bulan_berlaku.split("-");
+      bVal = parts[0] || currentMonth.toString();
+      tVal = parts[1] || currentYear.toString();
+    } else if (item.bulan && item.tahun) {
+      bVal = item.bulan.toString();
+      tVal = item.tahun.toString();
+    }
+
+    setFormData({
+      bulan: bVal,
+      tahun: tVal,
+      dasar_hukum: item.dasar_hukum || "",
+      besaran_iuran: item.besaran_iuran ? item.besaran_iuran.toString() : "",
+      pos_penerimaan: item.pos_penerimaan || "KAS RT",
+    });
+    setShowModal(true);
+  };
+
   // ✅ Simpan / Edit data
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -112,7 +138,7 @@ const SetIuranWargaPage = () => {
           tahun: tahunInt,
           bulan_berlaku: `${bulanInt}-${tahunInt}`,
           dasar_hukum: formData.dasar_hukum,
-          besaran_iuran: Number.parseInt(formData.besaran_iuran),
+          besaran_iuran: Number.parseInt(formData.besaran_iuran, 10),
           pos_penerimaan: formData.pos_penerimaan || "KAS RT",
           tanggal_berlaku: new Date(tahunInt, bulanInt - 1, 1).toISOString(),
           updatedAt: new Date().toISOString(),
@@ -133,17 +159,6 @@ const SetIuranWargaPage = () => {
         Swal.fire("Error", "Gagal menyimpan data", "error");
       }
     }
-  };
-
-  // ✅ Edit
-  const handleEdit = (item) => {
-    setEditingItem(item);
-    setFormData({
-      bulan_berlaku: item.bulan_berlaku,
-      dasar_hukum: item.dasar_hukum,
-      besaran_iuran: item.besaran_iuran.toString(),
-    });
-    setShowModal(true);
   };
 
   // ✅ Hapus
