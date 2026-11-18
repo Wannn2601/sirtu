@@ -5,10 +5,10 @@ import { firestoreService } from "../../services/firebase";
 import { toKey } from "../../utils/helpers";
 
 const IuranWargaPage = () => {
-  const [iurPaymentsData, setIurPaymentsData] = useState([]);
   const [wargaData, setWargaData] = useState([]);
   const [rewardData, setRewardData] = useState([]);
   const [keringananData, setKeringananData] = useState([]);
+  const [pengurusList, setPengurusList] = useState([]); // 🟢 State untuk data pengurus RT/PKK
   const [loading, setLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [reportType, setReportType] = useState("keseluruhan");
@@ -18,26 +18,21 @@ const IuranWargaPage = () => {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [iurRates, setIurRates] = useState([]);
 
-  const loadIurRates = async () => {
-    try {
-      const rates = await firestoreService.getAll("iurRates");
-      setIurRates(rates || []);
-    } catch (err) {
-      console.error("Error loading iurRates:", err);
-    }
-  };
-
   const loadAllData = async () => {
     try {
       setLoading(true);
-      const [kkResult, rewards, keringanan] = await Promise.all([
+      const [kkResult, rewards, keringanan, rates, pengurusRes] = await Promise.all([
         firestoreService.getAll("kkData"),
         firestoreService.getAll("rewardSadarIW"),
         firestoreService.getAll("keringananIUR"),
+        firestoreService.getAll("iurRates"),
+        firestoreService.getAll("pengurusRT"), // 🟢 Ambil data pengurus dari Firebase
       ]);
       setWargaData(kkResult || []);
       setRewardData(rewards || []);
       setKeringananData(keringanan || []);
+      setIurRates(rates || []);
+      setPengurusList(pengurusRes || []);
     } catch (error) {
       console.error("Error loading data:", error);
     } finally {
@@ -47,21 +42,56 @@ const IuranWargaPage = () => {
 
   useEffect(() => {
     loadAllData();
-    loadIurRates();
   }, []);
+
+  // 🟢 Fungsi helper untuk mendeteksi penandatangan bendahara aktif
+  const getPenandatanganInfo = () => {
+    const bendahara = pengurusList.find(
+      (p) =>
+        p.status?.toLowerCase() === "aktif" &&
+        p.jabatan?.toLowerCase().includes("bendahara")
+    );
+    return {
+      namaBendahara: bendahara?.nama_warga || "[Nama Bendahara]",
+    };
+  };
 
   const getNominalForMonth = (monthKey, year) => {
     const monthIndex = monthKeys.indexOf(monthKey) + 1;
-    const key = `${String(monthIndex).padStart(2, "0")}-${year}`;
+    const key = `${monthIndex}-${year}`;
+    const keyZeroPad = `${String(monthIndex).padStart(2, "0")}-${year}`;
 
-    // Normalisasi data Firestore agar 1-2025 → 01-2025
-    const rate = iurRates.find((r) => {
-      const formatted = r.bulan_berlaku.replace(/^(\d{1})-/, "0$1-");
-      return formatted === key;
+    // 1. Cari rate yang persis sesuai bulan & tahun tersebut
+    let rate = iurRates.find((r) => {
+      const formatted = (r.bulan_berlaku || "").replace(/^(\d{1})-/, "$1-");
+      return formatted === key || formatted === keyZeroPad || (Number(r.bulan) === monthIndex && Number(r.tahun) === year);
     });
 
-    return rate ? Number(rate.besaran_iuran) || 0 : 0;
+    // 2. Jika tidak ditemukan, ambil rate dari bulan/tahun terdekat sebelumnya (fallback ke iuran terakhir yang diset)
+    if (!rate && iurRates.length > 0) {
+      // Urutkan iurRates berdasarkan waktu/bulan
+      const sortedRates = [...iurRates].sort((a, b) => {
+        const [mA, yA] = (a.bulan_berlaku || "1-2026").split("-").map(Number);
+        const [mB, yB] = (b.bulan_berlaku || "1-2026").split("-").map(Number);
+        return (yA * 12 + mA) - (yB * 12 + mB);
+      });
+
+      // Cari rate terakhir yang tanggal/bulannya di bawah atau sama dengan bulan ini
+      const validRates = sortedRates.filter(r => {
+        const [m, y] = (r.bulan_berlaku || "1-2026").split("-").map(Number);
+        return (y * 12 + m) <= (year * 12 + monthIndex);
+      });
+
+      if (validRates.length > 0) {
+        rate = validRates[validRates.length - 1]; // Ambil yang paling mendekati / terakhir
+      } else {
+        rate = sortedRates[0]; // Fallback mutlak ke rate pertama
+      }
+    }
+
+    return rate ? Number(rate.besaran_iuran) || 0 : 15000; // Default fallback aman 15000 jika kosong total
   };
+
   function expandRange(startKey, endKey) {
     const result = [];
     let cursor = startKey;
@@ -70,54 +100,40 @@ const IuranWargaPage = () => {
       result.push(cursor);
       const [y, m] = cursor.split("-");
       const next = new Date(Number(y), Number(m), 1);
-      cursor = `${next.getFullYear()}-${String(next.getMonth()).padStart(
-        2,
-        "0"
-      )}`;
+      cursor = `${next.getFullYear()}-${String(next.getMonth()).padStart(2, "0")}`;
     }
-
     return result;
   }
 
   function getRewardMonths(reward) {
     const [sM, sY] = reward.start.split(":");
     const [eM, eY] = reward.end.split(":");
-
     const startKey = `${sY}-${sM.padStart(2, "0")}`;
     const endKey = `${eY}-${eM.padStart(2, "0")}`;
-
     const allMonths = expandRange(startKey, endKey);
-
     const count = Number(reward.bebasBulan || 1);
-
-    // Ambil hanya bulan terakhir sesuai bebasBulan
     return allMonths.slice(allMonths.length - count);
   }
+
   function isRewardMonth(monthYM, reward) {
     const rewardMonths = getRewardMonths(reward);
     return rewardMonths.includes(monthYM);
   }
+
   const getAdjustedPaymentStatus = (warga, monthKey, year, nominalAmount) => {
     try {
       const monthIndex = monthKeys.indexOf(monthKey) + 1;
       const monthYM = `${year}-${String(monthIndex).padStart(2, "0")}`;
-
       const namaKK = warga.nama_kepala_keluarga || warga.nama;
       const pembukuan = warga.pembukuan || "RT";
 
-      // ================================
-      // 1. CEK REWARD (koleksi rewardSadarIW)
-      // ================================
+      // 1. CEK REWARD
       for (const reward of rewardData) {
-        if ((reward.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase())
-          continue;
-
-        if (reward.kepalaWarga?.toLowerCase() !== namaKK.toLowerCase())
-          continue;
+        if ((reward.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase()) continue;
+        if (reward.kepalaWarga?.toLowerCase() !== namaKK?.toLowerCase()) continue;
 
         const [sM, sY] = reward.start.split(":");
         const [eM, eY] = reward.end.split(":");
-
         const startKey = `${sY}-${sM.padStart(2, "0")}`;
         const endKey = `${eY}-${eM.padStart(2, "0")}`;
 
@@ -128,18 +144,13 @@ const IuranWargaPage = () => {
         }
       }
 
-      // ================================
       // 2. KERINGANAN / PEMBEBASAN / PENGHAPUSAN
-      // ================================
       for (const k of keringananData) {
-        if ((k.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase())
-          continue;
-
-        if (k.kepalaWarga?.toLowerCase() !== namaKK.toLowerCase()) continue;
+        if ((k.pembukuan || "").toUpperCase() !== pembukuan.toUpperCase()) continue;
+        if (k.kepalaWarga?.toLowerCase() !== namaKK?.toLowerCase()) continue;
 
         const kStart = toKey(k.start);
         const kEnd = toKey(k.end);
-
         if (!kStart || !kEnd) continue;
 
         if (kStart <= monthYM && monthYM <= kEnd) {
@@ -149,7 +160,6 @@ const IuranWargaPage = () => {
 
           if (k.jenis === "KERINGANAN") {
             let amount = nominalAmount;
-
             if (k.bentuk === "rupiah") {
               amount = Math.max(0, nominalAmount - (k.potongan || 0));
             } else {
@@ -168,108 +178,68 @@ const IuranWargaPage = () => {
   };
 
   const months = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "Mei",
-    "Jun",
-    "Jul",
-    "Agustus",
-    "Sept",
-    "Okt",
-    "Nov",
-    "Des",
+    "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", 
+    "Jul", "Agustus", "Sept", "Okt", "Nov", "Des"
   ];
 
   const monthKeys = [
-    "januari",
-    "februari",
-    "maret",
-    "april",
-    "mei",
-    "juni",
-    "juli",
-    "agustus",
-    "september",
-    "oktober",
-    "november",
-    "desember",
+    "januari", "februari", "maret", "april", "mei", "juni", 
+    "juli", "agustus", "september", "oktober", "november", "desember"
   ];
 
   const formatAlamat = (data) => {
     const alamat = data.alamat || "";
     const noRumah = data.no_rumah ? `No. ${data.no_rumah}` : "";
-
     if (!alamat && !noRumah) return "-";
     return [alamat, noRumah].filter(Boolean).join(" | ");
   };
+
   const combinedData = useMemo(() => {
     if (!Array.isArray(wargaData)) return [];
 
     return wargaData.map((w) => {
       const pembukuan = w.pembukuan || "RT";
-
       const payments = {};
+
       monthKeys.forEach((monthKey) => {
         const raw = w[`payments_${selectedYear}`]?.[monthKey] || null;
-
         const nominal = getNominalForMonth(monthKey, selectedYear);
 
-        // base payment
         const base = {
           amount: raw?.amount ?? nominal,
           originalAmount: nominal,
           status: raw?.status ?? "belum_bayar",
-
           isReward: false,
           isPembebasan: false,
           isPenghapusan: false,
           isKeringanan: false,
-
           tanggal_bayar: raw?.tanggal_bayar || null,
         };
 
-        // apply reward / keringanan
-        // apply reward / keringanan / pembebasan
-        const adj = getAdjustedPaymentStatus(
-          w,
-          monthKey,
-          selectedYear,
-          nominal
-        );
+        const adj = getAdjustedPaymentStatus(w, monthKey, selectedYear, nominal);
 
         if (adj) {
           base.amount = adj.amount;
-
           if (adj.status === "reward") {
             base.isReward = true;
             base.status = "reward";
             base.amount = 0;
-            base.originalAmount = nominal; // tetap 50.000 untuk pelaporan
-            return (payments[monthKey] = base);
-          }
-
-          if (adj.status === "PEMBEBASAN") {
+            base.originalAmount = nominal;
+          } else if (adj.status === "PEMBEBASAN") {
             base.isPembebasan = true;
             base.status = "bebas";
             base.amount = 0;
-          }
-
-          if (adj.status === "PENGHAPUSAN") {
+          } else if (adj.status === "PENGHAPUSAN") {
             base.isPenghapusan = true;
             base.status = "hapus";
             base.amount = 0;
-          }
-
-          if (adj.status === "keringanan") {
+          } else if (adj.status === "keringanan") {
             base.isKeringanan = true;
             base.status = "keringanan";
           }
         } else {
-          // Tidak ada reward/keringanan → status asli warga
           base.status = raw?.status ?? "belum_bayar";
-          base.amount = raw?.amount ?? nominal;
+          base.amount = raw?.status === "lunas" ? (raw?.amount ?? nominal) : nominal;
         }
 
         payments[monthKey] = base;
@@ -287,26 +257,45 @@ const IuranWargaPage = () => {
   }, [wargaData, selectedYear, rewardData, keringananData, iurRates]);
 
   const enrichData = useMemo(() => {
+    // Ambil bulan saat ini (1 - 12). Jika tahun yang dipilih bukan tahun berjalan, sesuaikan.
+    const currentRealYear = new Date().getFullYear();
+    const currentRealMonth = new Date().getMonth() + 1; // 1 = Januari, 11 = November, dst.
+
     return combinedData.map((item) => {
       let totalTunggakan = 0;
       let totalPembebasan = 0;
       let totalKeringanan = 0;
       let totalDibayar = 0;
 
-      monthKeys.forEach((monthKey) => {
+      monthKeys.forEach((monthKey, index) => {
+        const monthNumber = index + 1; // 1 sampai 12
         const p = item.payments[monthKey];
+        const nominalRate = p.originalAmount || getNominalForMonth(monthKey, selectedYear);
+
+        // ATURAN: Jika tahun buku yang dipilih adalah tahun ini, 
+        // bulan yang melebihi bulan berjalan (misal: November & Desember) belum masuk sebagai tunggakan.
+        const isFutureMonthInCurrentYear = (selectedYear === currentRealYear && monthNumber >= currentRealMonth);
+        // Catatan: Jika tahun buku di bawah tahun sekarang (tahun lalu), semua 12 bulan dihitung tunggakan jika belum bayar.
+        const isPastOrCurrentYear = selectedYear < currentRealYear;
+
         if (p.isPembebasan || p.isPenghapusan) {
-          totalPembebasan += p.originalAmount;
+          totalPembebasan += nominalRate;
         } else if (p.isKeringanan) {
-          totalKeringanan += p.originalAmount - p.amount;
-          totalDibayar += p.amount;
+          totalKeringanan += (nominalRate - p.amount);
+          if (p.status === "lunas") {
+            totalDibayar += p.amount;
+          } else if (isPastOrCurrentYear || !isFutureMonthInCurrentYear) {
+            totalTunggakan += p.amount > 0 ? p.amount : nominalRate;
+          }
         } else if (p.isReward) {
-          // REWARD TIDAK MASUK HITUNGAN APA PUN
-          // amount = 0, ditandai biru saja
-        } else if (p.status === "lunas" && !p.isReward) {
+          // Reward tidak masuk tunggakan / dibayar
+        } else if (p.status === "lunas") {
           totalDibayar += p.amount;
         } else {
-          totalTunggakan += p.amount;
+          // Hanya hitung tunggakan jika bulan tersebut sudah lewat atau sudah berjalan (bukan bulan masa depan di tahun ini)
+          if (isPastOrCurrentYear || !isFutureMonthInCurrentYear) {
+            totalTunggakan += nominalRate;
+          }
         }
       });
 
@@ -318,36 +307,25 @@ const IuranWargaPage = () => {
         total_dibayar: totalDibayar,
       };
     });
-  }, [combinedData]);
+  }, [combinedData, selectedYear, iurRates]);
 
   const filteredData = enrichData
-    // 1. SORT A - Z
-    .slice() // supaya tidak mutate enrichData
-    .sort((a, b) =>
-      a.nama_kk.localeCompare(b.nama_kk, "id", { sensitivity: "base" })
-    )
-
-    // 2. APPLY FILTER
+    .slice()
+    .sort((a, b) => a.nama_kk.localeCompare(b.nama_kk, "id", { sensitivity: "base" }))
     .filter((item) => {
       const search = searchTerm.toLowerCase();
       const matchesSearch =
         item.nama_kk.toLowerCase().includes(search) ||
         item.alamat.toLowerCase().includes(search);
-
-      const matchesWarga =
-        reportType === "keseluruhan" || item.nama_kk === selectedWarga;
-
+      const matchesWarga = reportType === "keseluruhan" || item.nama_kk === selectedWarga;
       return matchesSearch && matchesWarga;
     });
 
   const totalPages = Math.ceil(filteredData.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedData = filteredData.slice(
-    startIndex,
-    startIndex + itemsPerPage
-  );
-
+  const paginatedData = filteredData.slice(startIndex, startIndex + itemsPerPage);
   const wargaNames = [...new Set(enrichData.map((item) => item.nama_kk))];
+  const currentTtd = getPenandatanganInfo();
 
   const formatCurrency = (amount) => {
     const numAmount = Number(amount) || 0;
@@ -360,18 +338,10 @@ const IuranWargaPage = () => {
 
   const getPaymentStatus = (payment) => {
     if (payment.isReward) return "bg-blue-200 text-blue-800 font-semibold";
-
-    if (payment.isPembebasan)
-      return "bg-purple-200 text-purple-800 font-semibold";
-
+    if (payment.isPembebasan) return "bg-purple-200 text-purple-800 font-semibold";
     if (payment.isPenghapusan) return "bg-gray-300 text-gray-800 font-semibold";
-
-    if (payment.isKeringanan)
-      return "bg-yellow-200 text-yellow-800 font-semibold";
-
-    if (payment.status === "lunas")
-      return "bg-green-200 text-green-800 font-semibold";
-
+    if (payment.isKeringanan) return "bg-yellow-200 text-yellow-800 font-semibold";
+    if (payment.status === "lunas") return "bg-green-200 text-green-800 font-semibold";
     return "bg-red-200 text-red-800 font-semibold";
   };
 
@@ -380,22 +350,15 @@ const IuranWargaPage = () => {
     if (payment.isPembebasan) return "B";
     if (payment.isPenghapusan) return "H";
     if (payment.isKeringanan) return "K";
-
     if (payment.status === "lunas") return "✓";
-    if (payment.status === "belum_bayar") return "X";
-
-    return "?";
+    return "X";
   };
 
   const renderKeseluruhanTable = () => (
     <div>
       <div className="text-center mb-6">
-        <h2 className="text-lg font-bold">
-          LAPORAN IURAN WAJIB WARGA TAHUN {selectedYear}
-        </h2>
-        <h3 className="text-base font-semibold">
-          RT 05 RW 08 KELURAHAN PADANGSARI
-        </h3>
+        <h2 className="text-lg font-bold">LAPORAN IURAN WAJIB WARGA TAHUN {selectedYear}</h2>
+        <h3 className="text-base font-semibold">RT 05 RW 08 KELURAHAN PADANGSARI</h3>
         <p className="text-sm">Per: {new Date().toLocaleDateString("id-ID")}</p>
       </div>
 
@@ -403,93 +366,31 @@ const IuranWargaPage = () => {
         <table className="min-w-full border-collapse border border-gray-300">
           <thead>
             <tr>
-              <th
-                rowSpan={2}
-                className="border border-gray-300 px-4 py-2 bg-gray-50"
-              >
-                NO
-              </th>
-              <th
-                rowSpan={2}
-                className="border border-gray-300 px-4 py-2 bg-gray-50"
-              >
-                Nama KK
-              </th>
-              <th
-                rowSpan={2}
-                className="border border-gray-300 px-4 py-2 bg-gray-50"
-              >
-                Alamat
-              </th>
-              <th
-                colSpan={12}
-                className="border border-gray-300 px-4 py-2 bg-blue-50 text-center"
-              >
-                Bulan
-              </th>
-              <th
-                rowSpan={2}
-                className="border border-gray-300 px-4 py-2 bg-gray-50"
-              >
-                Jml
-                <br />
-                Tunggakan
-              </th>
-              <th
-                rowSpan={2}
-                className="border border-gray-300 px-4 py-2 bg-gray-50"
-              >
-                Pembebasan
-              </th>
-              <th
-                rowSpan={2}
-                className="border border-gray-300 px-4 py-2 bg-gray-50"
-              >
-                Keringanan
-              </th>
-              <th
-                rowSpan={2}
-                className="border border-gray-300 px-4 py-2 bg-gray-50"
-              >
-                Total
-                <br />
-                Dibayar
-              </th>
+              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">NO</th>
+              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Nama KK</th>
+              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Alamat</th>
+              <th colSpan={12} className="border border-gray-300 px-4 py-2 bg-blue-50 text-center">Bulan</th>
+              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Jml<br />Tunggakan</th>
+              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Pembebasan</th>
+              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Keringanan</th>
+              <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Total<br />Dibayar</th>
             </tr>
             <tr>
               {months.map((month) => (
-                <th
-                  key={month}
-                  className="border border-gray-300 px-2 py-1 bg-blue-50 text-xs"
-                >
-                  {month}
-                </th>
+                <th key={month} className="border border-gray-300 px-2 py-1 bg-blue-50 text-xs">{month}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {paginatedData.map((item, index) => (
               <tr key={item.id}>
-                <td className="border border-gray-300 px-4 py-2 text-center">
-                  {startIndex + index + 1}
-                </td>
-                <td className="border border-gray-300 px-4 py-2">
-                  {item.nama_kk}
-                </td>
-                <td className="border border-gray-300 px-4 py-2">
-                  {item.alamat}
-                </td>
+                <td className="border border-gray-300 px-4 py-2 text-center">{startIndex + index + 1}</td>
+                <td className="border border-gray-300 px-4 py-2">{item.nama_kk}</td>
+                <td className="border border-gray-300 px-4 py-2">{item.alamat}</td>
                 {monthKeys.map((monthKey) => {
-                  const payment = item.payments?.[monthKey] || {
-                    status: "belum_bayar",
-                  };
+                  const payment = item.payments?.[monthKey] || { status: "belum_bayar" };
                   return (
-                    <td
-                      key={monthKey}
-                      className={`border border-gray-300 px-2 py-1 text-center text-xs ${getPaymentStatus(
-                        payment
-                      )}`}
-                    >
+                    <td key={monthKey} className={`border border-gray-300 px-2 py-1 text-center text-xs ${getPaymentStatus(payment)}`}>
                       {getPaymentStatusSymbol(payment)}
                     </td>
                   );
@@ -511,145 +412,62 @@ const IuranWargaPage = () => {
           </tbody>
         </table>
 
+        {/* 🟢 Tanda Tangan Dinamis */}
         <div className="mt-8 flex justify-end">
           <div className="text-center">
-            <p>
-              Semarang,{" "}
-              {new Date().toLocaleDateString("id-ID", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              })}
-            </p>
+            <p>Semarang, {new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
             <p className="mt-1">Bendahara</p>
             <div className="mt-16 border-b border-gray-400 w-48"></div>
-            <p className="mt-2">(nama_bendahara_berlaku)</p>
+            <p className="mt-2 font-bold underline">({currentTtd.namaBendahara})</p>
           </div>
         </div>
-      </div>
-
-      <div className="mt-4 text-sm text-gray-600 bg-gray-50 p-3 rounded">
-        <p className="font-semibold mb-2">Keterangan:</p>
-        <p>✓ = Lunas (Hijau)</p>
-        <p>X = Belum Bayar (Merah)</p>
-        <p>R = Reward/Bebas (Abu-abu)</p>
-        <p>K = Keringanan (Kuning)</p>
-        <p>- = Pembebasan (Abu-abu)</p>
       </div>
     </div>
   );
 
   const renderPerWargaTable = () => {
-    const selectedWargaData = filteredData.find(
-      (item) => item.nama_kk === selectedWarga
-    );
-    if (!selectedWargaData)
-      return (
-        <p className="text-center py-8">Pilih nama warga terlebih dahulu</p>
-      );
+    const selectedWargaData = filteredData.find((item) => item.nama_kk === selectedWarga);
+    if (!selectedWargaData) return <p className="text-center py-8">Pilih nama warga terlebih dahulu</p>;
 
     return (
       <div>
         <div className="text-center mb-6">
           <h2 className="text-lg font-bold">LAPORAN IURAN WAJIB WARGA</h2>
-          <h3 className="text-base font-semibold">
-            RT 05 RW 08 KELURAHAN PADANGSARI
-          </h3>
-          <p className="text-sm">
-            Per: {new Date().toLocaleDateString("id-ID")}
-          </p>
+          <h3 className="text-base font-semibold">RT 05 RW 08 KELURAHAN PADANGSARI</h3>
+          <p className="text-sm">Per: {new Date().toLocaleDateString("id-ID")}</p>
         </div>
 
         <div className="mb-4">
-          <p>
-            <strong>Nama Kepala Keluarga:</strong> {selectedWargaData.nama_kk}
-          </p>
-          <p>
-            <strong>Alamat:</strong> {selectedWargaData.alamat}
-          </p>
+          <p><strong>Nama Kepala Keluarga:</strong> {selectedWargaData.nama_kk}</p>
+          <p><strong>Alamat:</strong> {selectedWargaData.alamat}</p>
         </div>
 
         <div className="overflow-x-auto">
           <table className="min-w-full border-collapse border border-gray-300">
             <thead>
               <tr>
-                <th
-                  rowSpan={2}
-                  className="border border-gray-300 px-4 py-2 bg-gray-50"
-                >
-                  NO
-                </th>
-                <th
-                  rowSpan={2}
-                  className="border border-gray-300 px-4 py-2 bg-gray-50"
-                >
-                  Tahun
-                </th>
-                <th
-                  colSpan={12}
-                  className="border border-gray-300 px-4 py-2 bg-blue-50 text-center"
-                >
-                  Bulan
-                </th>
-                <th
-                  rowSpan={2}
-                  className="border border-gray-300 px-4 py-2 bg-gray-50"
-                >
-                  Jml
-                  <br />
-                  Tunggakan
-                </th>
-                <th
-                  rowSpan={2}
-                  className="border border-gray-300 px-4 py-2 bg-gray-50"
-                >
-                  Pembebasan
-                </th>
-                <th
-                  rowSpan={2}
-                  className="border border-gray-300 px-4 py-2 bg-gray-50"
-                >
-                  Keringanan
-                </th>
-                <th
-                  rowSpan={2}
-                  className="border border-gray-300 px-4 py-2 bg-gray-50"
-                >
-                  Total
-                  <br />
-                  Dibayar
-                </th>
+                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">NO</th>
+                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Tahun</th>
+                <th colSpan={12} className="border border-gray-300 px-4 py-2 bg-blue-50 text-center">Bulan</th>
+                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Jml<br />Tunggakan</th>
+                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Pembebasan</th>
+                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Keringanan</th>
+                <th rowSpan={2} className="border border-gray-300 px-4 py-2 bg-gray-50">Total<br />Dibayar</th>
               </tr>
               <tr>
                 {months.map((month) => (
-                  <th
-                    key={month}
-                    className="border border-gray-300 px-2 py-1 bg-blue-50 text-xs"
-                  >
-                    {month}
-                  </th>
+                  <th key={month} className="border border-gray-300 px-2 py-1 bg-blue-50 text-xs">{month}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td className="border border-gray-300 px-4 py-2 text-center">
-                  1
-                </td>
-                <td className="border border-gray-300 px-4 py-2">
-                  {selectedWargaData.tahun}
-                </td>
+                <td className="border border-gray-300 px-4 py-2 text-center">1</td>
+                <td className="border border-gray-300 px-4 py-2">{selectedWargaData.tahun}</td>
                 {monthKeys.map((monthKey) => {
-                  const payment = selectedWargaData.payments?.[monthKey] || {
-                    status: "belum_bayar",
-                  };
+                  const payment = selectedWargaData.payments?.[monthKey] || { status: "belum_bayar" };
                   return (
-                    <td
-                      key={monthKey}
-                      className={`border border-gray-300 px-2 py-1 text-center text-xs ${getPaymentStatus(
-                        payment
-                      )}`}
-                    >
+                    <td key={monthKey} className={`border border-gray-300 px-2 py-1 text-center text-xs ${getPaymentStatus(payment)}`}>
                       {getPaymentStatusSymbol(payment)}
                     </td>
                   );
@@ -671,28 +489,13 @@ const IuranWargaPage = () => {
           </table>
         </div>
 
-        <div className="mt-4 text-sm text-gray-600 bg-gray-50 p-3 rounded">
-          <p className="font-semibold mb-2">Keterangan:</p>
-          <p>✓ = Lunas (Hijau)</p>
-          <p>X = Belum Bayar (Merah)</p>
-          <p>R = Reward/Bebas (Abu-abu)</p>
-          <p>K = Keringanan (Kuning)</p>
-          <p>- = Pembebasan (Abu-abu)</p>
-        </div>
-
+        {/* 🟢 Tanda Tangan Dinamis */}
         <div className="mt-8 flex justify-end">
           <div className="text-center">
-            <p>
-              Semarang,{" "}
-              {new Date().toLocaleDateString("id-ID", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              })}
-            </p>
+            <p>Semarang, {new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
             <p className="mt-1">Bendahara</p>
             <div className="mt-16 border-b border-gray-400 w-48"></div>
-            <p className="mt-2">(nama_bendahara_berlaku)</p>
+            <p className="mt-2 font-bold underline">({currentTtd.namaBendahara})</p>
           </div>
         </div>
       </div>
@@ -702,44 +505,30 @@ const IuranWargaPage = () => {
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">
-          Laporan Iuran Warga
-        </h1>
-        <p className="text-gray-600">
-          Kelola laporan iuran warga dengan integrasi reward dan keringanan
-        </p>
+        <h1 className="text-2xl font-bold text-gray-800">Laporan Iuran Warga</h1>
+        <p className="text-gray-600">Kelola laporan iuran warga dengan integrasi reward dan keringanan</p>
       </div>
 
       {loading ? (
-        <div className="text-center py-8">
-          <p>Loading data...</p>
-        </div>
+        <div className="text-center py-8"><p>Loading data...</p></div>
       ) : (
         <>
           <div className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Tahun Buku
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Tahun Buku</label>
               <select
                 value={selectedYear}
-                onChange={(e) =>
-                  setSelectedYear(Number.parseInt(e.target.value))
-                }
+                onChange={(e) => setSelectedYear(Number.parseInt(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {[2023, 2024, 2025, 2026].map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
+                  <option key={year} value={year}>{year}</option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Pelaporan
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Pelaporan</label>
               <select
                 value={reportType}
                 onChange={(e) => {
@@ -755,9 +544,7 @@ const IuranWargaPage = () => {
 
             {reportType === "per_warga" && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Nama Warga
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Nama Warga</label>
                 <select
                   value={selectedWarga}
                   onChange={(e) => setSelectedWarga(e.target.value)}
@@ -766,18 +553,14 @@ const IuranWargaPage = () => {
                 >
                   <option value="">Pilih Nama Warga</option>
                   {wargaNames.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
+                    <option key={name} value={name}>{name}</option>
                   ))}
                 </select>
               </div>
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Cari Data
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Cari Data</label>
               <input
                 type="text"
                 placeholder="Cari nama KK atau alamat..."
@@ -808,28 +591,20 @@ const IuranWargaPage = () => {
               </div>
 
               <div className="text-sm text-gray-600">
-                Menampilkan {startIndex + 1} sampai{" "}
-                {Math.min(startIndex + itemsPerPage, filteredData.length)} dari{" "}
-                {filteredData.length} data
+                Menampilkan {startIndex + 1} sampai {Math.min(startIndex + itemsPerPage, filteredData.length)} dari {filteredData.length} data
               </div>
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() =>
-                    setCurrentPage((prev) => Math.max(prev - 1, 1))
-                  }
+                  onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
                   disabled={currentPage === 1}
                   className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
                 >
                   ‹
                 </button>
-                <span className="text-sm">
-                  {currentPage} / {totalPages}
-                </span>
+                <span className="text-sm">{currentPage} / {totalPages || 1}</span>
                 <button
-                  onClick={() =>
-                    setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                  }
+                  onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
                   disabled={currentPage === totalPages}
                   className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
                 >
@@ -839,9 +614,7 @@ const IuranWargaPage = () => {
             </div>
           )}
 
-          {reportType === "keseluruhan"
-            ? renderKeseluruhanTable()
-            : renderPerWargaTable()}
+          {reportType === "keseluruhan" ? renderKeseluruhanTable() : renderPerWargaTable()}
         </>
       )}
     </div>

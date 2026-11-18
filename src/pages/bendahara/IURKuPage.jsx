@@ -566,10 +566,8 @@ const IURKuPage = () => {
           const shortY = String(selectedYear).slice(-2);
           const targetStr = `${shortM}'${shortY}`;
 
-          // Jalankan reset total pada bulan bersangkutan & kalkulasi ulang reward
           await recalculateAndSaveWargaYear(userId, selectedYear, pembukuanType, monthLower);
 
-          // Hapus pencatatan di laporan keuangan berdasarkan nama warga dan bulan terkait secara akurat
           const allLaporan = await firestoreService.getAll("laporanKeuangan");
           const matchedLaporanList = allLaporan.filter(
             (l) =>
@@ -592,53 +590,47 @@ const IURKuPage = () => {
     });
   };
 
-  // Fungsi Kirim Pesan WhatsApp via Fonnte API
   const sendWhatsAppNotification = async (targetPhone, messageContent) => {
-  if (!targetPhone) {
-    console.warn("Nomor WhatsApp warga tidak ditemukan.");
-    return false;
-  }
-
-  // Bersihkan nomor dari spasi, tanda -, atau karakter non-digit
-  let formattedPhone = targetPhone.toString().replace(/\D/g, "");
-
-  // Format nomor Indonesia (ubah 08... menjadi 628...)
-  if (formattedPhone.startsWith("0")) {
-    formattedPhone = "62" + formattedPhone.slice(1);
-  }
-
-  try {
-    const response = await fetch("https://api.fonnte.com/send", {
-      method: "POST",
-      headers: {
-        Authorization: FONNTE_TOKEN,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        target: formattedPhone,
-        message: messageContent,
-        // countryCode: "62" // Opsional: memastikan kode negara jika diperlukan
-      }),
-    });
-
-    const resData = await response.json();
-    
-    if (resData.status) {
-      console.log("✅ Pesan WhatsApp berhasil dikirim via Fonnte ke:", formattedPhone);
-      return true;
-    } else {
-      console.error("❌ Gagal mengirim WhatsApp oleh Fonnte:", resData.reason || resData.message);
+    if (!targetPhone) {
+      console.warn("Nomor WhatsApp warga tidak ditemukan.");
       return false;
     }
-  } catch (err) {
-    console.error("❌ Error koneksi ke Fonnte API:", err);
-    return false;
-  }
-};
 
-  const recordToLaporanKeuangan = async (paymentArray, pembukuanType) => {
+    let formattedPhone = targetPhone.toString().replace(/\D/g, "");
+    if (formattedPhone.startsWith("0")) {
+      formattedPhone = "62" + formattedPhone.slice(1);
+    }
+
     try {
-      const currentDate = new Date().toISOString().split("T")[0];
+      const response = await fetch("https://api.fonnte.com/send", {
+        method: "POST",
+        headers: {
+          Authorization: FONNTE_TOKEN,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          target: formattedPhone,
+          message: messageContent,
+        }),
+      });
+
+      const resData = await response.json();
+      if (resData.status) {
+        console.log("✅ Pesan WhatsApp berhasil dikirim via Fonnte ke:", formattedPhone);
+        return true;
+      } else {
+        console.error("❌ Gagal mengirim WhatsApp oleh Fonnte:", resData.reason || resData.message);
+        return false;
+      }
+    } catch (err) {
+      console.error("❌ Error koneksi ke Fonnte API:", err);
+      return false;
+    }
+  };
+
+  const recordToLaporanKeuangan = async (paymentArray, pembukuanType, customInputDate) => {
+    try {
+      const transactionDate = customInputDate || new Date().toISOString().split("T")[0];
       const nowTimestamp = new Date();
       const wargaMap = {};
 
@@ -669,11 +661,10 @@ const IURKuPage = () => {
 
         if (totalPenerimaanForWarga <= 0) continue;
 
-        // 1 & 2. Generate no_arsip dengan mengambil bulan saat pembuatan (bulan berjalan saat ini)
         const random6Digits = Math.floor(100000 + Math.random() * 900000);
-        const currentActiveMonthNumber = new Date().getMonth() + 1; // Bulan berjalan saat ini (1-12)
+        const currentActiveMonthNumber = new Date().getMonth() + 1;
         const formattedCurrentMonthCode = String(currentActiveMonthNumber).padStart(2, "0");
-        const generatedNoArsip = `${idKkVal}.${random6Digits}.${formattedCurrentMonthCode}`;
+        const generatedNoArsip = `${random6Digits}.${formattedCurrentMonthCode}`;
 
         const formattedMonthsList = items.map((item) => {
           const sm = shortMonthNames[item.month] || item.month;
@@ -696,14 +687,14 @@ const IURKuPage = () => {
           pengeluaran: 0,
           saldo_bulan_ini: 0,
           saldo_bulan_lalu: 0,
-          tanggal: currentDate,
+          tanggal: transactionDate,
           updatedAt: nowTimestamp,
           uraian: "",
         };
 
         await firestoreService.add("laporanKeuangan", laporanPayload);
 
-        // 3 & 4. Kirim Pesan WhatsApp ke Nomor Warga menggunakan Fonnte
+        // Kirim WhatsApp ke nomor HP warga bersangkutan
         const rtVal = row?.rt || "-";
         const rwVal = row?.rw || "-";
         const kelurahanVal = row?.kelurahan || "-";
@@ -773,12 +764,9 @@ const IURKuPage = () => {
       }
     });
 
-    const currentDateStr = new Date().toLocaleDateString("id-ID", {
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-    });
+    const todayStr = new Date().toISOString().split("T")[0];
 
+    // Konfirmasi dengan SweetAlert mencakup input tanggal pembayaran
     const result = await Swal.fire({
       title: `<div style="font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 2px;">Konfirmasi Pembayaran</div>`,
       html: `
@@ -812,7 +800,8 @@ const IURKuPage = () => {
           .info-row {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 6px;
+            align-items: center;
+            margin-bottom: 8px;
             font-size: 13px;
           }
           .info-row:last-child {
@@ -826,6 +815,13 @@ const IURKuPage = () => {
             color: #0f172a;
             font-weight: 600;
             text-align: right;
+          }
+          .swal2-input-date {
+            width: 100%;
+            padding: 6px 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 13px;
           }
         </style>
         <div>
@@ -842,9 +838,9 @@ const IURKuPage = () => {
               <span class="info-label">Sejumlah</span>
               <span class="info-value" style="color: #059669; font-size: 14px;">Rp ${previewTotal.toLocaleString("id-ID")}</span>
             </div>
-            <div class="info-row">
-              <span class="info-label">Tanggal</span>
-              <span class="info-value">${currentDateStr}</span>
+            <div class="info-row" style="margin-top: 10px; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+              <span class="info-label">Tanggal Pembayaran</span>
+              <input type="date" id="swal-input-tanggal" class="swal2-input-date" value="${todayStr}">
             </div>
           </div>
         </div>
@@ -855,10 +851,17 @@ const IURKuPage = () => {
       confirmButtonText: "Ya, Proses Pembayaran",
       cancelButtonText: "Batal",
       reverseButtons: true,
+      preConfirm: () => {
+        const tanggalInput = document.getElementById("swal-input-tanggal").value;
+        if (!tanggalInput) {
+          Swal.showValidationMessage("Tanggal pembayaran wajib diisi!");
+        }
+        return tanggalInput;
+      }
     });
 
     if (result.isConfirmed) {
-      const currentDate = new Date().toISOString().split("T")[0];
+      const customInputDate = result.value;
       let successCount = 0;
       let errorCount = 0;
 
@@ -896,7 +899,7 @@ const IURKuPage = () => {
 
               await updateIurPayment(rowId, month.toLowerCase(), {
                 status: "lunas",
-                tanggal_bayar: currentDate,
+                tanggal_bayar: customInputDate,
                 amount: isThisMonthReward ? 0 : nominal.amount,
                 isReward: isThisMonthReward,
               });
@@ -909,7 +912,7 @@ const IURKuPage = () => {
           })
         );
 
-        await recordToLaporanKeuangan(paymentArray, pembukuanType);
+        await recordToLaporanKeuangan(paymentArray, pembukuanType, customInputDate);
 
         setSelectedPayments(new Set());
         await loadAllData();
@@ -1219,6 +1222,53 @@ const IURKuPage = () => {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* 🟢 Kontrol Pagination & Show Items per Page */}
+        <div className="p-4 border-t bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <span>Show:</span>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => {
+                setItemsPerPage(Number.parseInt(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="px-2 py-1 border border-gray-300 rounded text-sm bg-white"
+            >
+              <option value={10}>10</option>
+              <option value={15}>15</option>
+              <option value={20}>20</option>
+              <option value={25}>25</option>
+            </select>
+            <span>data per halaman</span>
+          </div>
+
+          <div className="text-sm text-gray-600">
+            Menampilkan {filteredData.length > 0 ? startIndex + 1 : 0} sampai{" "}
+            {Math.min(startIndex + itemsPerPage, filteredData.length)} dari{" "}
+            {filteredData.length} data
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 border border-gray-300 rounded text-sm bg-white hover:bg-gray-100 disabled:opacity-50"
+            >
+              Prev
+            </button>
+            <span className="text-sm font-medium">
+              {currentPage} / {totalPages || 1}
+            </span>
+            <button
+              onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+              disabled={currentPage === totalPages || totalPages === 0}
+              className="px-3 py-1 border border-gray-300 rounded text-sm bg-white hover:bg-gray-100 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
     </div>

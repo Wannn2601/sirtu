@@ -644,7 +644,7 @@ const PembukaanPage = () => {
 
     const result = await Swal.fire({
       title: "Hapus Data?",
-      text: "Data yang dihapus tidak dapat dikembalikan!",
+      text: "Data yang dihapus akan menghapus catatan keuangan dan mereset status pembayaran di IUR-Ku warga terkait!",
       icon: "warning",
       showCancelButton: true,
       confirmButtonColor: "#ef4444",
@@ -657,6 +657,67 @@ const PembukaanPage = () => {
       try {
         setLoading(true);
 
+        // 1. Cek apakah transaksi ini berasal dari IUR-Ku (biasanya lewat id_sub_rekening_kegiatan "1.2" atau "2.2" atau ada format nama di detail)
+        const detailText = item.detail || item.keterangan || "";
+        const isIurPayment = item.id_sub_rekening_kegiatan === "1.2" || item.id_sub_rekening_kegiatan === "2.2" || detailText.toLowerCase().includes("ipl bulan");
+
+        if (isIurPayment) {
+          // Ambil semua data warga (kkData) untuk mencocokkan nama kepala keluarga yang ada di dalam string 'detail'
+          const allKkData = await firestoreService.getAll("kkData");
+          
+          for (const kk of allKkData) {
+            const namaWarga = (kk.nama_kepala_keluarga || kk.nama || "").trim();
+            if (namaWarga && detailText.toLowerCase().includes(namaWarga.toLowerCase())) {
+              // Cari tahu tahun dan bulan apa saja yang tercantum di detail (contoh: mar'26 atau maret)
+              // Kita periksa semua tahun pembayaran yang ada di dokumen kk (misal payments_2026, payments_2025)
+              const paymentKeys = Object.keys(kk).filter(k => k.startsWith("payments_"));
+              
+              for (const pKey of paymentKeys) {
+                const yearNum = pKey.replace("payments_", "");
+                const monthsMap = kk[pKey] || {};
+                const updatedMonthsMap = { ...monthsMap };
+                let needUpdate = false;
+
+                // Daftar singkatan bulan dan nama bulan lengkap
+                const monthMapping = {
+                  "jan": "januari", "feb": "februari", "mar": "maret", "apr": "april",
+                  "mei": "mei", "jun": "juni", "jul": "juli", "agt": "agustus", "sep": "september",
+                  "okt": "oktober", "nov": "november", "des": "desember"
+                };
+
+                for (const [shortM, fullM] of Object.entries(monthMapping)) {
+                  // Cek apakah string detail mengandung nama bulan dan tahun transaksi
+                  const yearShort = yearNum.slice(-2);
+                  if (
+                    (detailText.toLowerCase().includes(shortM) || detailText.toLowerCase().includes(fullM)) &&
+                    (detailText.includes(yearShort) || detailText.includes(yearNum))
+                  ) {
+                    if (updatedMonthsMap[fullM] && updatedMonthsMap[fullM].status === "lunas") {
+                      updatedMonthsMap[fullM] = {
+                        ...updatedMonthsMap[fullM],
+                        amount: 0,
+                        status: "belum_bayar",
+                        tanggal_bayar: null,
+                        cancelled_at: new Date().toISOString(),
+                        cancelled_by: userData?.nama || "Admin"
+                      };
+                      needUpdate = true;
+                    }
+                  }
+                }
+
+                if (needUpdate) {
+                  await firestoreService.update("kkData", kk.id, {
+                    [pKey]: updatedMonthsMap,
+                    updatedAt: new Date()
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        // 2. Hapus data di laporan keuangan (seperti penanganan mutasi atau data biasa)
         if (item.jenis_pembukuan === "Mutasi Anggaran") {
           await firestoreService.delete("laporanKeuangan", id);
 
@@ -688,7 +749,7 @@ const PembukaanPage = () => {
         Swal.fire({
           icon: "success",
           title: "Berhasil!",
-          text: "Data berhasil dihapus",
+          text: "Data pembukuan dihapus dan status IUR-Ku warga telah di-reset.",
           timer: 2000,
           showConfirmButton: false,
         });
@@ -698,7 +759,7 @@ const PembukaanPage = () => {
         Swal.fire({
           icon: "error",
           title: "Error!",
-          text: "Gagal menghapus data",
+          text: "Gagal menghapus data: " + error.message,
         });
       } finally {
         setLoading(false);
